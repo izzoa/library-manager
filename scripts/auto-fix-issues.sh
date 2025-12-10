@@ -1,15 +1,14 @@
 #!/bin/bash
-# auto-fix-issues.sh - Automatically handle GitHub issues with Claude
+# auto-fix-issues.sh - Automatically handle GitHub issues with Claude Code
 #
-# This script:
-# 1. Checks for new open issues
-# 2. Launches Claude to analyze and fix them
-# 3. Claude will respond to issues, ask for clarification if needed, or fix and close
+# This script opens Claude Code interactively (uses your Max subscription)
+# and feeds it the issue context.
 #
 # Usage:
 #   ./auto-fix-issues.sh              # Process all open issues
 #   ./auto-fix-issues.sh --issue 5    # Process specific issue
 #   ./auto-fix-issues.sh --dry-run    # Just show what would be processed
+#   ./auto-fix-issues.sh --cli        # Use CLI mode instead of interactive
 #
 # Cron (check every 30 min):
 #   */30 * * * * cd /path/to/library-manager && ./scripts/auto-fix-issues.sh >> /var/log/issue-bot.log 2>&1
@@ -45,6 +44,7 @@ trap "rm -f $LOCK_FILE" EXIT
 # Parse arguments
 DRY_RUN=false
 SPECIFIC_ISSUE=""
+USE_CLI=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -55,6 +55,10 @@ while [[ $# -gt 0 ]]; do
         --issue)
             SPECIFIC_ISSUE="$2"
             shift 2
+            ;;
+        --cli)
+            USE_CLI=true
+            shift
             ;;
         *)
             echo "Unknown option: $1"
@@ -67,12 +71,17 @@ done
 cd "$PROJECT_DIR"
 
 # Check dependencies
-for cmd in gh claude jq; do
+for cmd in gh jq; do
     if ! command -v $cmd &> /dev/null; then
         log "Error: $cmd is not installed"
         exit 1
     fi
 done
+
+if ! command -v claude &> /dev/null; then
+    log "Error: claude is not installed"
+    exit 1
+fi
 
 # Get open issues
 log "Checking for open issues on $REPO..."
@@ -157,15 +166,57 @@ $COMMENTS
 
 Write responses like a real developer - casual and helpful, not formal AI-speak."
 
-    # Run Claude with the prompt
+    # Save prompt to temp file
+    TEMP_PROMPT="/tmp/claude-issue-$NUM.txt"
+    echo "$PROMPT" > "$TEMP_PROMPT"
+
     log "Launching Claude Code..."
 
-    # Use -p for print mode (non-interactive)
-    # --dangerously-skip-permissions to auto-approve tool usage
-    # --append-system-prompt to add our guidelines
-    claude -p "$PROMPT" \
-        --dangerously-skip-permissions \
-        --append-system-prompt "$GUIDELINES"
+    if [ "$USE_CLI" = true ]; then
+        # CLI mode (uses API credits)
+        claude -p "$PROMPT" \
+            --dangerously-skip-permissions \
+            --append-system-prompt "$GUIDELINES"
+    else
+        # Interactive mode using tmux (uses Max subscription)
+        # Check if tmux is available
+        if ! command -v tmux &> /dev/null; then
+            log "tmux not installed - falling back to CLI mode"
+            log "Install tmux for interactive mode: sudo apt install tmux"
+            claude -p "$PROMPT" \
+                --dangerously-skip-permissions \
+                --append-system-prompt "$GUIDELINES"
+        else
+            # Create a tmux session and run claude interactively
+            SESSION_NAME="claude-issue-$NUM"
+
+            # Kill existing session if any
+            tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
+
+            # Create new session and run claude with the prompt
+            # The prompt is passed as initial input
+            tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_DIR"
+
+            # Send the claude command with prompt
+            tmux send-keys -t "$SESSION_NAME" "claude \"$PROMPT\"" Enter
+
+            log "Claude Code started in tmux session: $SESSION_NAME"
+            log "To attach: tmux attach -t $SESSION_NAME"
+            log "To check status: tmux ls"
+
+            # Wait a bit for it to start
+            sleep 2
+
+            # For fully automated: wait for session to end
+            # For semi-automated: just notify and let user attach
+            log ""
+            log "Claude is working on issue #$NUM in the background."
+            log "Attach to watch: tmux attach -t $SESSION_NAME"
+        fi
+    fi
+
+    # Clean up temp file
+    rm -f "$TEMP_PROMPT"
 
     # Mark as processed
     echo "$NUM" >> "$STATE_FILE"
