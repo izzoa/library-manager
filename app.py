@@ -983,6 +983,9 @@ def process_all_queue(config):
     rate_limit_hits = 0
 
     while True:
+        # Reload config each batch so settings changes take effect immediately
+        config = load_config()
+
         # Check rate limit before processing
         allowed, calls_made, max_calls = check_rate_limit(config)
         if not allowed:
