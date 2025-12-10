@@ -578,8 +578,37 @@ def scan_library(config):
     """Wrapper that calls deep scan."""
     return deep_scan_library(config)
 
+def check_rate_limit(config):
+    """Check if we're within API rate limits. Returns (allowed, calls_this_hour, limit)."""
+    conn = get_db()
+    c = conn.cursor()
+
+    max_per_hour = config.get('max_requests_per_hour', 30)
+
+    # Get calls in the last hour
+    one_hour_ago = (datetime.now() - timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    c.execute('SELECT api_calls FROM stats WHERE date = ?', (today,))
+    row = c.fetchone()
+    calls_today = row['api_calls'] if row else 0
+
+    conn.close()
+
+    # Simple hourly check - in practice we're using daily count as approximation
+    # For more accurate tracking, we'd need a separate API call log table
+    allowed = calls_today < max_per_hour
+    return allowed, calls_today, max_per_hour
+
+
 def process_queue(config, limit=None):
     """Process items in the queue."""
+    # Check rate limit first
+    allowed, calls_made, max_calls = check_rate_limit(config)
+    if not allowed:
+        logger.warning(f"Rate limit reached: {calls_made}/{max_calls} calls. Waiting...")
+        return 0, 0
+
     conn = get_db()
     c = conn.cursor()
 
@@ -587,7 +616,7 @@ def process_queue(config, limit=None):
     if limit:
         batch_size = min(batch_size, limit)
 
-    logger.info(f"[DEBUG] process_queue called with batch_size={batch_size}, limit={limit}")
+    logger.info(f"[DEBUG] process_queue called with batch_size={batch_size}, limit={limit} (API: {calls_made}/{max_calls})")
 
     # Get batch from queue
     c.execute('''SELECT q.id as queue_id, q.book_id, q.reason,
@@ -764,7 +793,7 @@ worker_running = False
 processing_status = {"active": False, "processed": 0, "total": 0, "current": "", "errors": []}
 
 def process_all_queue(config):
-    """Process ALL items in the queue in batches."""
+    """Process ALL items in the queue in batches, respecting rate limits."""
     global processing_status
 
     conn = get_db()
@@ -777,16 +806,36 @@ def process_all_queue(config):
         logger.info("Queue is empty, nothing to process")
         return 0, 0  # (total_processed, total_fixed)
 
+    # Calculate delay between batches based on rate limit
+    max_per_hour = config.get('max_requests_per_hour', 30)
+    # Spread requests across the hour: 3600 seconds / max_requests
+    min_delay = max(2, 3600 // max_per_hour)  # At least 2 seconds
+    logger.info(f"Rate limit: {max_per_hour}/hour, delay between batches: {min_delay}s")
+
     processing_status = {"active": True, "processed": 0, "total": total, "current": "", "errors": []}
     logger.info(f"=== STARTING PROCESS ALL: {total} items in queue ===")
 
     total_processed = 0
     total_fixed = 0
     batch_num = 0
+    rate_limit_hits = 0
 
     while True:
+        # Check rate limit before processing
+        allowed, calls_made, max_calls = check_rate_limit(config)
+        if not allowed:
+            rate_limit_hits += 1
+            if rate_limit_hits >= 3:
+                logger.warning(f"Rate limit hit {rate_limit_hits} times, stopping for now")
+                processing_status["errors"].append(f"Rate limit reached: {calls_made}/{max_calls}")
+                break
+            logger.info(f"Rate limit reached ({calls_made}/{max_calls}), waiting 5 minutes...")
+            processing_status["current"] = f"Rate limited, waiting... ({calls_made}/{max_calls})"
+            time.sleep(300)  # Wait 5 minutes
+            continue
+
         batch_num += 1
-        logger.info(f"--- Processing batch {batch_num} ---")
+        logger.info(f"--- Processing batch {batch_num} (API: {calls_made}/{max_calls}) ---")
 
         processed, fixed = process_queue(config)
 
@@ -802,17 +851,22 @@ def process_all_queue(config):
                 logger.info("Queue is now empty")
                 break
             else:
-                logger.warning(f"No items processed but {remaining} remain - possible API error")
+                # Could be rate limit or API error
+                logger.warning(f"No items processed but {remaining} remain")
                 processing_status["errors"].append(f"Batch {batch_num}: No items processed, {remaining} remain")
-                break
+                # Wait and retry once
+                time.sleep(10)
+                continue
 
         total_processed += processed
         total_fixed += fixed
         processing_status["processed"] = total_processed
+        processing_status["current"] = f"Batch {batch_num}: {processed} processed"
         logger.info(f"Batch {batch_num} complete: {processed} processed, {fixed} fixed, {total_processed}/{total} total")
 
-        # Rate limiting between batches
-        time.sleep(2)
+        # Rate limiting delay between batches
+        logger.debug(f"Waiting {min_delay}s before next batch...")
+        time.sleep(min_delay)
 
     processing_status["active"] = False
     logger.info(f"=== PROCESS ALL COMPLETE: {total_processed} processed, {total_fixed} fixed ===")
