@@ -45,12 +45,12 @@
 <div id="queue-container">
 {% if queue_items %}
 <div class="card">
-    <div class="card-body">
-        <table class="table" id="queue-table">
-            <thead>
+    <div class="card-body p-0" style="max-height: 500px; overflow-y: auto;">
+        <table class="table table-sm mb-0" id="queue-table">
+            <thead style="position: sticky; top: 0; background: rgba(22, 33, 62, 0.95); z-index: 10;">
                 <tr>
-                    <th>Current Author</th>
-                    <th>Current Title</th>
+                    <th>Author</th>
+                    <th>Title</th>
                     <th>Issue</th>
                     <th>Added</th>
                     <th>Actions</th>
@@ -59,15 +59,15 @@
             <tbody id="queue-body">
                 {% for item in queue_items %}
                 <tr id="queue-{{ item.id }}">
-                    <td>
+                    <td class="text-truncate" style="max-width: 150px;">
                         <span class="text-warning">{{ item.current_author }}</span>
                     </td>
-                    <td>{{ item.current_title }}</td>
-                    <td><span class="badge bg-danger">{{ item.reason }}</span></td>
-                    <td><small>{{ item.added_at[:16] if item.added_at else 'Unknown' }}</small></td>
+                    <td class="text-truncate" style="max-width: 200px;">{{ item.current_title }}</td>
+                    <td><small class="badge bg-danger text-wrap" style="max-width: 200px;">{{ item.reason[:50] }}{% if item.reason|length > 50 %}...{% endif %}</small></td>
+                    <td><small>{{ item.added_at[5:16] if item.added_at else '?' }}</small></td>
                     <td>
                         <button class="btn btn-sm btn-outline-secondary" onclick="removeFromQueue({{ item.id }})" title="Mark as OK">
-                            <i class="bi bi-check"></i> OK
+                            <i class="bi bi-check"></i>
                         </button>
                     </td>
                 </tr>

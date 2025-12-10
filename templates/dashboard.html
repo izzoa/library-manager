@@ -43,25 +43,25 @@
 
 <div class="row mb-4">
     <div class="col-md-6">
-        <div class="card">
+        <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-lightning"></i> Quick Actions</span>
             </div>
-            <div class="card-body">
+            <div class="card-body d-flex flex-column justify-content-center">
                 <div class="d-grid gap-2">
-                    <button class="btn btn-primary btn-lg" onclick="triggerScan()" id="scan-btn">
+                    <button class="btn btn-primary" onclick="triggerScan()" id="scan-btn">
                         <i class="bi bi-search"></i> Scan Library
                     </button>
-                    <button class="btn btn-success btn-lg" onclick="processQueue()" id="process-btn">
+                    <button class="btn btn-success" onclick="processQueue()" id="process-btn">
                         <i class="bi bi-play-fill"></i> Process Queue (1 batch)
                     </button>
                     {% if worker_running %}
-                    <button class="btn btn-outline-danger" onclick="stopWorker()">
-                        <i class="bi bi-stop-fill"></i> Stop Background Worker
+                    <button class="btn btn-outline-danger btn-sm" onclick="stopWorker()">
+                        <i class="bi bi-stop-fill"></i> Stop Worker
                     </button>
                     {% else %}
-                    <button class="btn btn-outline-success" onclick="startWorker()">
-                        <i class="bi bi-play-fill"></i> Start Background Worker
+                    <button class="btn btn-outline-success btn-sm" onclick="startWorker()">
+                        <i class="bi bi-play-fill"></i> Start Worker
                     </button>
                     {% endif %}
                 </div>
@@ -69,26 +69,26 @@
         </div>
     </div>
     <div class="col-md-6">
-        <div class="card">
+        <div class="card h-100">
             <div class="card-header">
                 <i class="bi bi-bar-chart"></i> Stats (Last 7 Days)
             </div>
-            <div class="card-body">
+            <div class="card-body p-0" style="max-height: 250px; overflow-y: auto;">
                 {% if daily_stats %}
-                <table class="table table-sm">
-                    <thead>
+                <table class="table table-sm mb-0">
+                    <thead style="position: sticky; top: 0; background: rgba(22, 33, 62, 0.95);">
                         <tr>
                             <th>Date</th>
                             <th>Scanned</th>
                             <th>Queued</th>
                             <th>Fixed</th>
-                            <th>API Calls</th>
+                            <th>API</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for stat in daily_stats %}
                         <tr>
-                            <td>{{ stat.date }}</td>
+                            <td>{{ stat.date[5:] }}</td>
                             <td>{{ stat.scanned or 0 }}</td>
                             <td>{{ stat.queued or 0 }}</td>
                             <td>{{ stat.fixed or 0 }}</td>
@@ -98,7 +98,7 @@
                     </tbody>
                 </table>
                 {% else %}
-                <p class="text-muted">No stats yet. Run a scan to start tracking.</p>
+                <p class="text-muted p-3">No stats yet. Run a scan to start tracking.</p>
                 {% endif %}
             </div>
         </div>
@@ -109,38 +109,38 @@
     <div class="col-12">
         <div class="card">
             <div class="card-header">
-                <i class="bi bi-clock-history"></i> Recent Activity
+                <i class="bi bi-clock-history"></i> Recent Activity (Last 15)
             </div>
-            <div class="card-body">
+            <div class="card-body p-0" style="max-height: 400px; overflow-y: auto;">
                 {% if recent_history %}
-                <table class="table">
-                    <thead>
+                <table class="table table-sm mb-0">
+                    <thead style="position: sticky; top: 0; background: rgba(22, 33, 62, 0.95);">
                         <tr>
                             <th>Date</th>
                             <th>Original</th>
                             <th></th>
                             <th>Fixed To</th>
-                            <th>Action</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for h in recent_history %}
+                        {% for h in recent_history[:15] %}
                         <tr>
-                            <td><small>{{ h.fixed_at[:16] }}</small></td>
-                            <td>
+                            <td><small>{{ h.fixed_at[5:16] }}</small></td>
+                            <td class="text-truncate" style="max-width: 200px;">
                                 <span class="text-danger">{{ h.old_author }}</span> /
                                 <span class="text-warning">{{ h.old_title }}</span>
                             </td>
                             <td><i class="bi bi-arrow-right text-info"></i></td>
-                            <td>
+                            <td class="text-truncate" style="max-width: 200px;">
                                 <span class="text-success">{{ h.new_author }}</span> /
                                 <span class="text-info">{{ h.new_title }}</span>
                             </td>
                             <td>
                                 {% if h.old_path != h.new_path %}
-                                <span class="badge badge-fix bg-danger">Fixed</span>
+                                <span class="badge bg-danger">Fixed</span>
                                 {% else %}
-                                <span class="badge badge-pending bg-warning text-dark">Pending</span>
+                                <span class="badge bg-warning text-dark">OK</span>
                                 {% endif %}
                             </td>
                         </tr>
@@ -148,7 +148,7 @@
                     </tbody>
                 </table>
                 {% else %}
-                <p class="text-muted">No fixes yet. Scan and process the queue to get started.</p>
+                <p class="text-muted p-3">No fixes yet. Scan and process the queue to get started.</p>
                 {% endif %}
             </div>
         </div>

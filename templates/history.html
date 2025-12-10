@@ -9,9 +9,9 @@
 
 {% if history_items %}
 <div class="card">
-    <div class="card-body">
-        <table class="table">
-            <thead>
+    <div class="card-body p-0" style="max-height: 600px; overflow-y: auto;">
+        <table class="table table-sm mb-0">
+            <thead style="position: sticky; top: 0; background: rgba(22, 33, 62, 0.95); z-index: 10;">
                 <tr>
                     <th>Date</th>
                     <th>Original</th>
@@ -24,13 +24,13 @@
             <tbody>
                 {% for h in history_items %}
                 <tr>
-                    <td><small>{{ h.fixed_at[:16] }}</small></td>
-                    <td>
+                    <td><small>{{ h.fixed_at[5:16] }}</small></td>
+                    <td class="text-truncate" style="max-width: 180px;">
                         <strong class="text-danger">{{ h.old_author }}</strong><br>
                         <small class="text-muted">{{ h.old_title }}</small>
                     </td>
                     <td><i class="bi bi-arrow-right text-info"></i></td>
-                    <td>
+                    <td class="text-truncate" style="max-width: 180px;">
                         <strong class="text-success">{{ h.new_author }}</strong><br>
                         <small class="text-info">{{ h.new_title }}</small>
                     </td>
@@ -46,7 +46,7 @@
                     <td>
                         {% if h.status == 'pending_fix' %}
                         <button class="btn btn-sm btn-success" onclick="applyFix({{ h.id }})">
-                            <i class="bi bi-check"></i> Apply
+                            <i class="bi bi-check"></i>
                         </button>
                         {% else %}
                         <span class="text-muted">-</span>
