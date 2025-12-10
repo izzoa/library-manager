@@ -1356,6 +1356,19 @@ def api_reset_database():
         return jsonify({'success': False, 'message': str(e)})
 
 
+@app.route('/api/recent_history')
+def api_recent_history():
+    """Get recent history items for live updates."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT h.*, b.path FROM history h
+                 JOIN books b ON h.book_id = b.id
+                 ORDER BY h.fixed_at DESC LIMIT 15''')
+    items = [dict(row) for row in c.fetchall()]
+    conn.close()
+    return jsonify({'items': items})
+
+
 @app.route('/api/bug_report')
 def api_bug_report():
     """Generate a bug report with system info and sanitized config."""

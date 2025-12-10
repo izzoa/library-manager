@@ -113,7 +113,7 @@
             </div>
             <div class="card-body p-0" style="max-height: 400px; overflow-y: auto;">
                 {% if recent_history %}
-                <table class="table table-sm mb-0">
+                <table class="table table-sm mb-0" id="recent-activity-table">
                     <thead style="position: sticky; top: 0; background: rgba(22, 33, 62, 0.95);">
                         <tr>
                             <th>Date</th>
@@ -253,5 +253,53 @@ function stopWorker() {
         .then(r => r.json())
         .then(() => location.reload());
 }
+
+// Auto-refresh stats and recent activity
+function refreshDashboard() {
+    fetch('/api/stats')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('total-books').textContent = data.total_books;
+            document.getElementById('queue-count').textContent = data.queue_size;
+            document.getElementById('fixed-count').textContent = data.fixed;
+        });
+
+    fetch('/api/recent_history')
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.querySelector('#recent-activity-table tbody');
+            if (tbody && data.items) {
+                tbody.innerHTML = data.items.map(h => `
+                    <tr>
+                        <td><small>${h.fixed_at ? h.fixed_at.substring(5, 16) : ''}</small></td>
+                        <td class="text-truncate" style="max-width: 200px;">
+                            <span class="text-danger">${escapeHtml(h.old_author)}</span> /
+                            <span class="text-warning">${escapeHtml(h.old_title)}</span>
+                        </td>
+                        <td><i class="bi bi-arrow-right text-info"></i></td>
+                        <td class="text-truncate" style="max-width: 200px;">
+                            <span class="text-success">${escapeHtml(h.new_author)}</span> /
+                            <span class="text-info">${escapeHtml(h.new_title)}</span>
+                        </td>
+                        <td>
+                            ${h.old_path !== h.new_path ?
+                                '<span class="badge bg-danger">Fixed</span>' :
+                                '<span class="badge bg-warning text-dark">OK</span>'}
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        });
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Refresh every 5 seconds
+setInterval(refreshDashboard, 5000);
 </script>
 {% endblock %}
