@@ -2,6 +2,13 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.7] - 2025-12-10
+
+### Fixed
+- **Hardcoded log path** - Log file path no longer hardcoded to `/home/deucebucket/`
+  - Now uses script directory dynamically via `os.path.dirname(__file__)`
+  - Fixes startup error for other users (thanks for the first issue report!)
+
 ## [0.9.0-beta.6] - 2025-12-10
 
 ### Added

@@ -11,7 +11,7 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.6"
+APP_VERSION = "0.9.0-beta.7"
 GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
 
 # Versioning Guide:
@@ -217,12 +217,15 @@ def extract_folder_metadata(folder_path):
 
     return hints
 
-# Configure logging
+# Configure logging - use script directory for log file
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(APP_DIR, 'app.log')
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/home/deucebucket/library-manager/app.log'),
+        logging.FileHandler(LOG_FILE),
         logging.StreamHandler()
     ]
 )
