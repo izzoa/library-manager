@@ -11,6 +11,15 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
+APP_VERSION = "0.9.0-beta.1"
+GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
+
+# Versioning Guide:
+# 0.9.0-beta.1  = Current (early beta, testing features)
+# 0.9.0-beta.2  = Next beta after bug fixes
+# 0.9.0-rc.1    = Release candidate (feature complete, final testing)
+# 1.0.0         = First stable release (everything works!)
+
 import os
 import sys
 import json
@@ -56,7 +65,10 @@ DEFAULT_CONFIG = {
     "batch_size": 3,
     "max_requests_per_hour": 30,
     "auto_fix": False,
-    "enabled": True
+    "protect_author_changes": True,  # Require approval if author changes completely
+    "enabled": True,
+    "update_channel": "beta",  # "stable", "beta", or "nightly"
+    "naming_format": "author/title"  # "author/title", "author - title", "author/series/title"
 }
 
 DEFAULT_SECRETS = {
@@ -199,7 +211,108 @@ def save_secrets(secrets):
     with open(SECRETS_PATH, 'w') as f:
         json.dump(secrets, f, indent=2)
 
+# ============== DRASTIC CHANGE DETECTION ==============
+
+def is_drastic_author_change(old_author, new_author):
+    """
+    Check if an author change is "drastic" (completely different person)
+    vs just formatting (case change, initials expanded, etc.)
+
+    Returns True if the change is drastic and should require approval.
+    """
+    if not old_author or not new_author:
+        return False
+
+    # Normalize for comparison
+    old_norm = old_author.lower().strip()
+    new_norm = new_author.lower().strip()
+
+    # If they're the same after normalization, not drastic
+    if old_norm == new_norm:
+        return False
+
+    # Extract key words (remove common prefixes/suffixes)
+    def get_name_parts(name):
+        # Remove punctuation and split
+        import re
+        clean = re.sub(r'[^\w\s]', ' ', name.lower())
+        parts = [p for p in clean.split() if len(p) > 1]
+        return set(parts)
+
+    old_parts = get_name_parts(old_author)
+    new_parts = get_name_parts(new_author)
+
+    # If no overlap at all, definitely drastic
+    if not old_parts.intersection(new_parts):
+        # Check for initials match (e.g., "J.R.R. Tolkien" vs "Tolkien")
+        # Get last names (usually the longest word or last word)
+        old_last = max(old_parts, key=len) if old_parts else ""
+        new_last = max(new_parts, key=len) if new_parts else ""
+
+        if old_last and new_last and (old_last in new_last or new_last in old_last):
+            return False  # Probably same person
+
+        return True  # Completely different
+
+    # Some overlap - check how much
+    overlap = len(old_parts.intersection(new_parts))
+    total = max(len(old_parts), len(new_parts))
+
+    # If less than 30% overlap, consider it drastic
+    if total > 0 and overlap / total < 0.3:
+        return True
+
+    return False
+
 # ============== BOOK METADATA APIs ==============
+
+# Rate limiting for each API (last call timestamp)
+# Based on research:
+# - Audnexus: No docs, small project - 1 req/sec max
+# - OpenLibrary: Had issues with high traffic - 1 req/sec
+# - Google Books: ~1000/day free = ~40/hour - 1 req/2sec
+# - Hardcover: Beta API, be conservative - 1 req/2sec
+API_RATE_LIMITS = {
+    'audnexus': {'last_call': 0, 'min_delay': 1.5},      # 1.5 sec between calls
+    'openlibrary': {'last_call': 0, 'min_delay': 1.5},   # 1.5 sec between calls
+    'googlebooks': {'last_call': 0, 'min_delay': 2.5},   # 2.5 sec between calls (stricter)
+    'hardcover': {'last_call': 0, 'min_delay': 2.5},     # 2.5 sec between calls (beta)
+}
+API_RATE_LOCK = threading.Lock()
+
+def rate_limit_wait(api_name):
+    """Wait if needed to respect rate limits for the given API."""
+    with API_RATE_LOCK:
+        if api_name not in API_RATE_LIMITS:
+            return
+
+        limit_info = API_RATE_LIMITS[api_name]
+        now = time.time()
+        elapsed = now - limit_info['last_call']
+        wait_time = limit_info['min_delay'] - elapsed
+
+        if wait_time > 0:
+            logger.debug(f"Rate limiting {api_name}: waiting {wait_time:.1f}s")
+            time.sleep(wait_time)
+
+        API_RATE_LIMITS[api_name]['last_call'] = time.time()
+
+
+def build_new_path(lib_path, author, title, series=None, config=None):
+    """Build a new path based on the naming format configuration."""
+    naming_format = config.get('naming_format', 'author/title') if config else 'author/title'
+
+    if naming_format == 'author - title':
+        # Flat structure: Author - Title (single folder)
+        folder_name = f"{author} - {title}"
+        return lib_path / folder_name
+    elif naming_format == 'author/series/title' and series:
+        # Three-level: Author/Series/Title
+        return lib_path / author / series / title
+    else:
+        # Default: Author/Title (two-level)
+        return lib_path / author / title
+
 
 def clean_search_title(messy_name):
     """Clean up a messy filename to extract searchable title."""
@@ -220,6 +333,7 @@ def clean_search_title(messy_name):
 
 def search_openlibrary(title, author=None):
     """Search OpenLibrary for book metadata. Free, no API key needed."""
+    rate_limit_wait('openlibrary')
     try:
         import urllib.parse
         query = urllib.parse.quote(title)
@@ -257,6 +371,7 @@ def search_openlibrary(title, author=None):
 
 def search_google_books(title, author=None, api_key=None):
     """Search Google Books for book metadata."""
+    rate_limit_wait('googlebooks')
     try:
         import urllib.parse
         query = title
@@ -298,6 +413,7 @@ def search_google_books(title, author=None, api_key=None):
 
 def search_audnexus(title, author=None):
     """Search Audnexus API for audiobook metadata. Pulls from Audible."""
+    rate_limit_wait('audnexus')
     try:
         import urllib.parse
         # Audnexus search endpoint
@@ -335,6 +451,7 @@ def search_audnexus(title, author=None):
 
 def search_hardcover(title, author=None):
     """Search Hardcover.app API for book metadata."""
+    rate_limit_wait('hardcover')
     try:
         import urllib.parse
         # Hardcover GraphQL API
@@ -393,38 +510,225 @@ def search_hardcover(title, author=None):
         logger.debug(f"Hardcover search failed: {e}")
         return None
 
+def extract_author_title(messy_name):
+    """Try to extract author and title from a folder name like 'Author - Title' or 'Author/Title'."""
+    import re
+
+    # Common separators: " - ", " / ", " _ "
+    separators = [' - ', ' / ', ' _ ', ' – ']  # includes en-dash
+
+    for sep in separators:
+        if sep in messy_name:
+            parts = messy_name.split(sep, 1)
+            if len(parts) == 2:
+                author = parts[0].strip()
+                title = parts[1].strip()
+                # Basic validation - author shouldn't be too long or look like a title
+                if len(author) < 50 and not re.search(r'\d{4}|book|vol|part|\[', author, re.I):
+                    return author, title
+
+    # No separator found - just return the whole thing as title
+    return None, messy_name
+
 def lookup_book_metadata(messy_name, config):
     """Try to look up book metadata from multiple APIs, cycling through until found."""
-    clean_title = clean_search_title(messy_name)
+    # Try to extract author and title separately for better search
+    author_hint, title_part = extract_author_title(messy_name)
+    clean_title = clean_search_title(title_part)
 
     if not clean_title or len(clean_title) < 3:
         return None
 
-    logger.debug(f"Looking up metadata for: {clean_title}")
+    if author_hint:
+        logger.debug(f"Looking up metadata for: '{clean_title}' by '{author_hint}'")
+    else:
+        logger.debug(f"Looking up metadata for: {clean_title}")
 
     # 1. Try Audnexus first (best for audiobooks, pulls from Audible)
-    result = search_audnexus(clean_title)
+    result = search_audnexus(clean_title, author=author_hint)
     if result:
         return result
 
     # 2. Try OpenLibrary (free, huge database)
-    result = search_openlibrary(clean_title)
+    result = search_openlibrary(clean_title, author=author_hint)
     if result:
         return result
 
     # 3. Try Google Books
     google_key = config.get('google_books_api_key')
-    result = search_google_books(clean_title, api_key=google_key)
+    result = search_google_books(clean_title, author=author_hint, api_key=google_key)
     if result:
         return result
 
     # 4. Try Hardcover.app (modern Goodreads alternative)
-    result = search_hardcover(clean_title)
+    result = search_hardcover(clean_title, author=author_hint)
     if result:
         return result
 
     logger.debug(f"No API results for: {clean_title}")
     return None
+
+
+def gather_all_api_candidates(title, author=None, config=None):
+    """
+    Search ALL APIs and return ALL results (not just the first match).
+    This is used for verification when we need multiple perspectives.
+    """
+    candidates = []
+    clean_title = clean_search_title(title)
+
+    if not clean_title or len(clean_title) < 3:
+        return candidates
+
+    # Search each API and collect all results
+    apis = [
+        ('Audnexus', search_audnexus),
+        ('OpenLibrary', search_openlibrary),
+        ('GoogleBooks', lambda t, a: search_google_books(t, a, config.get('google_books_api_key') if config else None)),
+        ('Hardcover', search_hardcover),
+    ]
+
+    for api_name, search_func in apis:
+        try:
+            # Search with author hint
+            result = search_func(clean_title, author)
+            if result:
+                result['search_query'] = f"{author} - {clean_title}" if author else clean_title
+                candidates.append(result)
+
+            # Also search without author (might find different results)
+            if author:
+                result_no_author = search_func(clean_title, None)
+                if result_no_author and result_no_author.get('author') != (result.get('author') if result else None):
+                    result_no_author['search_query'] = clean_title
+                    candidates.append(result_no_author)
+        except Exception as e:
+            logger.debug(f"Error searching {api_name}: {e}")
+
+    # Deduplicate by author+title
+    seen = set()
+    unique_candidates = []
+    for c in candidates:
+        key = f"{c.get('author', '').lower()}|{c.get('title', '').lower()}"
+        if key not in seen:
+            seen.add(key)
+            unique_candidates.append(c)
+
+    return unique_candidates
+
+
+def build_verification_prompt(original_input, original_author, original_title, proposed_author, proposed_title, candidates):
+    """
+    Build a verification prompt that shows ALL API candidates and asks AI to vote.
+    """
+    candidate_list = ""
+    for i, c in enumerate(candidates, 1):
+        candidate_list += f"  CANDIDATE_{i}: {c.get('author', 'Unknown')} - {c.get('title', 'Unknown')} (from {c.get('source', 'Unknown')})\n"
+
+    if not candidate_list:
+        candidate_list = "  No API results found.\n"
+
+    return f"""You are a book metadata verification expert. A drastic author change was detected and needs your verification.
+
+ORIGINAL INPUT: {original_input}
+  - Current Author: {original_author}
+  - Current Title: {original_title}
+
+PROPOSED CHANGE:
+  - New Author: {proposed_author}
+  - New Title: {proposed_title}
+
+ALL API SEARCH RESULTS:
+{candidate_list}
+YOUR TASK:
+Analyze whether the proposed change is CORRECT or WRONG. Consider:
+
+1. AUTHOR MATCHING: Does the original author name match or partially match any candidate?
+   - "Boyett" matches "Steven Boyett" (same person, use full name)
+   - "Boyett" does NOT match "John Dickson Carr" (different person!)
+   - "A.C. Crispin" matches "A. C. Crispin" or "Ann C. Crispin" (same person)
+
+2. TITLE MATCHING: Same title can exist by DIFFERENT authors!
+   - "The Hollow Man" by Steven Boyett (sci-fi) vs John Dickson Carr (mystery)
+   - "Yellow" by Aron Beauregard (horror) vs "The King in Yellow" by Chambers (different book!)
+
+3. TRUST THE INPUT: If original has a real author name, KEEP that author unless clearly wrong.
+
+4. FIND THE BEST MATCH: Pick the candidate whose author MATCHES or EXTENDS the original.
+
+RESPOND WITH JSON ONLY:
+{{
+  "decision": "CORRECT" or "WRONG" or "UNCERTAIN",
+  "recommended_author": "The correct author name",
+  "recommended_title": "The correct title",
+  "reasoning": "Brief explanation of why",
+  "confidence": "HIGH" or "MEDIUM" or "LOW"
+}}
+
+If original author matches a candidate (like Boyett -> Steven Boyett), decision is CORRECT with the full name.
+If proposed author is completely different person, decision is WRONG.
+If uncertain, decision is UNCERTAIN."""
+
+
+def verify_drastic_change(original_input, original_author, original_title, proposed_author, proposed_title, config):
+    """
+    Verify a drastic change by gathering all API candidates and having AI vote.
+    Returns: {'verified': bool, 'author': str, 'title': str, 'reasoning': str}
+    """
+    logger.info(f"Verifying drastic change: {original_author} -> {proposed_author}")
+
+    # Gather ALL candidates from ALL APIs
+    candidates = gather_all_api_candidates(original_title, original_author, config)
+
+    # Also search with proposed info to get more candidates
+    if proposed_author and proposed_author != original_author:
+        more_candidates = gather_all_api_candidates(proposed_title, proposed_author, config)
+        for c in more_candidates:
+            if c not in candidates:
+                candidates.append(c)
+
+    logger.info(f"Gathered {len(candidates)} candidates for verification")
+
+    # Build verification prompt
+    prompt = build_verification_prompt(
+        original_input, original_author, original_title,
+        proposed_author, proposed_title, candidates
+    )
+
+    # Call AI for verification
+    provider = config.get('ai_provider', 'openrouter')
+    try:
+        if provider == 'gemini' and config.get('gemini_api_key'):
+            verification = call_gemini(prompt, config)  # Already returns parsed dict
+        elif config.get('openrouter_api_key'):
+            verification = call_openrouter(prompt, config)  # Already returns parsed dict
+        else:
+            logger.error("No API key for verification!")
+            return None
+
+        if not verification:
+            return None
+
+        # Result is already parsed by call_gemini/call_openrouter
+
+        decision = verification.get('decision', 'UNCERTAIN')
+        confidence = verification.get('confidence', 'LOW')
+
+        logger.info(f"Verification result: {decision} ({confidence}): {verification.get('reasoning', '')[:100]}")
+
+        return {
+            'verified': decision in ['CORRECT'] and confidence in ['HIGH', 'MEDIUM'],
+            'decision': decision,
+            'author': verification.get('recommended_author', original_author),
+            'title': verification.get('recommended_title', original_title),
+            'reasoning': verification.get('reasoning', ''),
+            'confidence': confidence,
+            'candidates_found': len(candidates)
+        }
+    except Exception as e:
+        logger.error(f"Verification failed: {e}")
+        return None
+
 
 # ============== AI API ==============
 
@@ -444,28 +748,41 @@ def build_prompt(messy_names, api_results=None):
 
 {names_list}
 
-YOUR JOB:
-1. If "API found" data is shown, USE IT - this is verified metadata from book databases
-2. USE YOUR KNOWLEDGE of real books and authors to identify correct metadata
-3. If you recognize the book title, provide the CORRECT author even if the filename is wrong
-4. If you only see a title with no author, LOOK UP who actually wrote that book
-5. Verify authors are REAL people who write books, not random words from the filename
+MOST IMPORTANT RULE - TRUST THE EXISTING AUTHOR:
+If the input is already in "Author / Title" or "Author - Title" format with a human name as author:
+- KEEP THAT AUTHOR unless you're 100% certain it's wrong
+- Many books have the SAME TITLE by DIFFERENT AUTHORS
+- Example: "The Hollow Man" exists by BOTH Steven Boyett AND John Dickson Carr - different books!
+- Example: "Yellow" by Aron Beauregard is NOT "The King in Yellow" by Chambers!
+- If API returns a DIFFERENT AUTHOR for the same title, TRUST THE INPUT AUTHOR
 
-CRITICAL RULES:
-- TRUST API results when provided - they come from real book databases
-- If API result looks correct, use that author/title
-- Authors are REAL people (e.g. "Brandon Sanderson", "Stephen King", "Cebelius")
-- If the filename already has "Author / Title" format and looks correct, KEEP IT
-- Do NOT swap author and title - if "Cebelius / Book Title" the author is Cebelius
-- Random words like "Rose", "Blue", single words are usually NOT authors unless they're actually famous authors
+WHEN TO CHANGE THE AUTHOR:
+- Only if the "author" in input is clearly NOT an author name (e.g., "Bastards Series", "Unknown", "Various")
+- Only if the author/title are swapped (e.g., "Mistborn / Brandon Sanderson" -> swap them)
+- Only if it's clearly gibberish
+
+WHEN TO KEEP THE AUTHOR:
+- Input: "Boyett/The Hollow Man" -> Keep author "Boyett" (Steven Boyett wrote this book!)
+- Input: "Aron Beauregard/Yellow" -> Keep author "Aron Beauregard" (he wrote "Yellow"!)
+- If it looks like a human name (First Last, or Last name), it's probably correct
+
+API RESULTS WARNING:
+- API may return wrong results because same title exists by different authors
+- If API author is different from input author, IGNORE THE API and keep input author
+- Only use API if input has NO author (just a title)
+
+OTHER RULES:
 - KEEP series info: "Book 2", "Book 5", "Part 1" must stay in the title
 - Remove junk: [bitsearch.to], [64k], version numbers, format tags
+- Fix obvious typos in author names (e.g., "Annie Jacobson" -> "Annie Jacobsen")
+- Clean up title formatting but keep the essence
 
 EXAMPLES:
-- "Cebelius / Would you Love a Monster Girl, Book 5 - Rose" -> Author: Cebelius, Title: Would you Love a Monster Girl, Book 5 (Rose is subtitle, not author!)
-- "The Martian" -> Author: Andy Weir, Title: The Martian (you know who wrote this!)
-- "Brandon Sanderson - Mistborn" -> Author: Brandon Sanderson, Title: Mistborn
-- "Project Hail Mary [64k]" -> Author: Andy Weir, Title: Project Hail Mary
+- "Boyett/The Hollow Man" -> Author: Steven Boyett, Title: The Hollow Man (KEEP Boyett as author!)
+- "Aron Beauregard/Yellow" -> Author: Aron Beauregard, Title: Yellow (NOT Chambers!)
+- "Brandon Sanderson - Mistborn #1 - The Final Empire" -> Author: Brandon Sanderson, Title: Mistborn: The Final Empire
+- "The Martian" (no author) -> Author: Andy Weir, Title: The Martian (OK to add author)
+- "Bastards Series/King of the" (gibberish) -> SKIP or use best guess from title only
 
 Return JSON array. Each object MUST have "item" matching the ITEM_N label:
 [
@@ -1074,10 +1391,66 @@ def process_queue(config, limit=None):
         if new_author != row['current_author'] or new_title != row['current_title']:
             old_path = Path(row['path'])
             lib_path = old_path.parent.parent
-            new_author_dir = lib_path / new_author
-            new_path = new_author_dir / new_title
+            new_path = build_new_path(lib_path, new_author, new_title, config=config)
 
-            if config.get('auto_fix', False):
+            # Check for drastic author change
+            drastic_change = is_drastic_author_change(row['current_author'], new_author)
+            protect_authors = config.get('protect_author_changes', True)
+
+            # If drastic change detected, run verification pipeline
+            if drastic_change and protect_authors:
+                logger.info(f"DRASTIC CHANGE DETECTED: {row['current_author']} -> {new_author}, running verification...")
+
+                # Run verification with all APIs
+                original_input = f"{row['current_author']}/{row['current_title']}"
+                verification = verify_drastic_change(
+                    original_input,
+                    row['current_author'], row['current_title'],
+                    new_author, new_title,
+                    config
+                )
+
+                if verification:
+                    if verification['verified']:
+                        # AI verified the change is correct (or corrected it)
+                        new_author = verification['author']
+                        new_title = verification['title']
+                        # Recheck if it's still drastic after verification
+                        drastic_change = is_drastic_author_change(row['current_author'], new_author)
+                        logger.info(f"VERIFIED: {row['current_author']} -> {new_author} ({verification['reasoning'][:50]}...)")
+                    elif verification['decision'] == 'WRONG':
+                        # AI says the change is wrong - use the recommended fix instead
+                        new_author = verification['author']
+                        new_title = verification['title']
+                        drastic_change = is_drastic_author_change(row['current_author'], new_author)
+                        logger.info(f"CORRECTED: {row['current_author']} -> {new_author} (was wrong: {verification['reasoning'][:50]}...)")
+                    else:
+                        # AI is uncertain - block the change
+                        logger.warning(f"BLOCKED (uncertain): {row['current_author']} -> {new_author}")
+                        # Record as pending_fix for manual review
+                        c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status, error_message)
+                                     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_fix', ?)''',
+                                 (row['book_id'], row['current_author'], row['current_title'],
+                                  new_author, new_title, str(old_path), str(new_path),
+                                  f"Uncertain: {verification.get('reasoning', 'needs review')}"))
+                        c.execute('UPDATE books SET status = ? WHERE id = ?', ('pending_fix', row['book_id']))
+                        c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                        processed += 1
+                        continue
+                else:
+                    # Verification failed - block the change
+                    logger.warning(f"BLOCKED (verification failed): {row['current_author']} -> {new_author}")
+                    c.execute('UPDATE books SET status = ? WHERE id = ?', ('pending_fix', row['book_id']))
+                    c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
+                    processed += 1
+                    continue
+
+                # Recalculate new_path with potentially updated author/title
+                new_path = build_new_path(lib_path, new_author, new_title, config=config)
+
+            # Only auto-fix if enabled AND NOT a drastic change
+            # Drastic changes ALWAYS require manual approval to prevent data loss
+            if config.get('auto_fix', False) and not drastic_change:
                 # Actually rename the folder
                 try:
                     if new_path.exists():
@@ -1090,7 +1463,7 @@ def process_queue(config, limit=None):
                         if not any(old_path.parent.iterdir()):
                             old_path.parent.rmdir()
                     else:
-                        new_author_dir.mkdir(parents=True, exist_ok=True)
+                        new_path.parent.mkdir(parents=True, exist_ok=True)
                         old_path.rename(new_path)
                         if not any(old_path.parent.iterdir()):
                             old_path.parent.rmdir()
@@ -1341,6 +1714,11 @@ def is_worker_running():
     global worker_thread, worker_running
     return worker_running and worker_thread is not None and worker_thread.is_alive()
 
+@app.context_processor
+def inject_worker_status():
+    """Inject worker_running into all templates automatically."""
+    return {'worker_running': is_worker_running()}
+
 # ============== ROUTES ==============
 
 @app.route('/')
@@ -1415,19 +1793,33 @@ def history_page():
     c = conn.cursor()
 
     page = request.args.get('page', 1, type=int)
+    status_filter = request.args.get('status', None)
     per_page = 50
     offset = (page - 1) * per_page
 
-    c.execute('SELECT COUNT(*) as count FROM history')
-    total = c.fetchone()['count']
-
-    c.execute('''SELECT h.*, b.status FROM history h
-                 JOIN books b ON h.book_id = b.id
-                 ORDER BY h.fixed_at DESC
-                 LIMIT ? OFFSET ?''', (per_page, offset))
-    history_items = c.fetchall()
-
+    # Build query based on status filter
+    if status_filter == 'pending':
+        c.execute("SELECT COUNT(*) as count FROM history WHERE status = 'pending_fix'")
+        total = c.fetchone()['count']
+        c.execute('''SELECT * FROM history
+                     WHERE status = 'pending_fix'
+                     ORDER BY fixed_at DESC
+                     LIMIT ? OFFSET ?''', (per_page, offset))
+    else:
+        c.execute('SELECT COUNT(*) as count FROM history')
+        total = c.fetchone()['count']
+        c.execute('''SELECT * FROM history
+                     ORDER BY fixed_at DESC
+                     LIMIT ? OFFSET ?''', (per_page, offset))
+    rows = c.fetchall()
     conn.close()
+
+    # Convert to dicts and add is_drastic flag
+    history_items = []
+    for row in rows:
+        item = dict(row)
+        item['is_drastic'] = is_drastic_author_change(item.get('old_author'), item.get('new_author'))
+        history_items.append(item)
 
     total_pages = (total + per_page - 1) // per_page
 
@@ -1435,7 +1827,8 @@ def history_page():
                           history_items=history_items,
                           page=page,
                           total_pages=total_pages,
-                          total=total)
+                          total=total,
+                          status_filter=status_filter)
 
 @app.route('/settings', methods=['GET', 'POST'])
 def settings_page():
@@ -1453,8 +1846,11 @@ def settings_page():
         config['batch_size'] = int(request.form.get('batch_size', 3))
         config['max_requests_per_hour'] = int(request.form.get('max_requests_per_hour', 30))
         config['auto_fix'] = 'auto_fix' in request.form
+        config['protect_author_changes'] = 'protect_author_changes' in request.form
         config['enabled'] = 'enabled' in request.form
         config['google_books_api_key'] = request.form.get('google_books_api_key', '').strip() or None
+        config['update_channel'] = request.form.get('update_channel', 'stable')
+        config['naming_format'] = request.form.get('naming_format', 'author/title')
 
         # Save config (without secrets)
         save_config(config)
@@ -1469,7 +1865,7 @@ def settings_page():
         return redirect(url_for('settings_page'))
 
     config = load_config()
-    return render_template('settings.html', config=config)
+    return render_template('settings.html', config=config, version=APP_VERSION)
 
 # ============== API ENDPOINTS ==============
 
@@ -1479,6 +1875,48 @@ def api_scan():
     config = load_config()
     scanned, queued = scan_library(config)
     return jsonify({'success': True, 'scanned': scanned, 'queued': queued})
+
+@app.route('/api/deep_rescan', methods=['POST'])
+def api_deep_rescan():
+    """Deep re-scan: Reset all books and re-queue for fresh metadata lookup."""
+    conn = get_db()
+    c = conn.cursor()
+
+    # Clear queue first
+    c.execute('DELETE FROM queue')
+
+    # Reset book statuses to force re-checking, BUT skip 'protected' books (user undid these)
+    c.execute("UPDATE books SET status = 'pending' WHERE status != 'protected'")
+
+    # Get count of protected books
+    c.execute("SELECT COUNT(*) as count FROM books WHERE status = 'protected'")
+    protected_count = c.fetchone()['count']
+
+    # Get all non-protected books and add to queue
+    c.execute("SELECT id, path FROM books WHERE status != 'protected'")
+    books = c.fetchall()
+
+    queued = 0
+    for book in books:
+        # Add to queue for re-processing
+        c.execute('INSERT INTO queue (book_id, added_at) VALUES (?, ?)',
+                  (book['id'], datetime.now().isoformat()))
+        queued += 1
+
+    conn.commit()
+    conn.close()
+
+    msg = f'Queued {queued} books for fresh metadata verification'
+    if protected_count > 0:
+        msg += f' ({protected_count} protected books skipped)'
+
+    logger.info(f"Deep re-scan: {msg}")
+    return jsonify({
+        'success': True,
+        'queued': queued,
+        'protected': protected_count,
+        'message': msg
+    })
 
 @app.route('/api/process', methods=['POST'])
 def api_process():
@@ -1508,6 +1946,33 @@ def api_apply_fix(history_id):
     """Apply a specific fix."""
     success, message = apply_fix(history_id)
     return jsonify({'success': success, 'message': message})
+
+@app.route('/api/reject_fix/<int:history_id>', methods=['POST'])
+def api_reject_fix(history_id):
+    """Reject a pending fix - delete it and mark book as OK."""
+    conn = get_db()
+    c = conn.cursor()
+
+    # Get the history entry
+    c.execute('SELECT book_id FROM history WHERE id = ?', (history_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Fix not found'})
+
+    book_id = row['book_id']
+
+    # Delete the history entry
+    c.execute('DELETE FROM history WHERE id = ?', (history_id,))
+
+    # Mark book as verified/OK so it doesn't get re-queued
+    c.execute("UPDATE books SET status = 'verified' WHERE id = ?", (book_id,))
+
+    conn.commit()
+    conn.close()
+
+    logger.info(f"Rejected fix {history_id}, book {book_id} marked as verified")
+    return jsonify({'success': True})
 
 @app.route('/api/apply_all_pending', methods=['POST'])
 def api_apply_all_pending():
@@ -1550,6 +2015,152 @@ def api_remove_from_queue(queue_id):
 
     conn.close()
     return jsonify({'success': True})
+
+@app.route('/api/find_drastic_changes')
+def api_find_drastic_changes():
+    """Find history items where author changed drastically - potential mistakes."""
+    conn = get_db()
+    c = conn.cursor()
+
+    # Get all fixed items where old and new path differ
+    c.execute('''SELECT * FROM history
+                 WHERE status = 'fixed' AND old_path != new_path
+                 ORDER BY fixed_at DESC''')
+    items = c.fetchall()
+    conn.close()
+
+    drastic_items = []
+    for item in items:
+        if is_drastic_author_change(item['old_author'], item['new_author']):
+            drastic_items.append({
+                'id': item['id'],
+                'old_author': item['old_author'],
+                'old_title': item['old_title'],
+                'new_author': item['new_author'],
+                'new_title': item['new_title'],
+                'fixed_at': item['fixed_at']
+            })
+
+    return jsonify({
+        'count': len(drastic_items),
+        'items': drastic_items[:50]  # Limit to 50 for UI
+    })
+
+@app.route('/api/undo_all_drastic', methods=['POST'])
+def api_undo_all_drastic():
+    """Undo all drastic author changes."""
+    import shutil
+
+    conn = get_db()
+    c = conn.cursor()
+
+    # Get all fixed items
+    c.execute('''SELECT * FROM history
+                 WHERE status = 'fixed' AND old_path != new_path''')
+    items = c.fetchall()
+
+    undone = 0
+    errors = 0
+
+    for item in items:
+        if not is_drastic_author_change(item['old_author'], item['new_author']):
+            continue
+
+        old_path = item['old_path']
+        new_path = item['new_path']
+
+        # Check if paths exist correctly
+        if not os.path.exists(new_path):
+            continue  # Already moved or doesn't exist
+        if os.path.exists(old_path):
+            continue  # Original location already exists
+
+        try:
+            shutil.move(new_path, old_path)
+            c.execute('''UPDATE history SET status = 'undone', error_message = 'Auto-undone: drastic author change'
+                         WHERE id = ?''', (item['id'],))
+            c.execute('''UPDATE books SET
+                         current_author = ?, current_title = ?, path = ?, status = 'protected'
+                         WHERE id = ?''',
+                      (item['old_author'], item['old_title'], old_path, item['book_id']))
+            undone += 1
+            logger.info(f"Auto-undone drastic change: {item['new_author']} -> {item['old_author']}")
+        except Exception as e:
+            errors += 1
+            logger.error(f"Failed to undo {item['id']}: {e}")
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'undone': undone,
+        'errors': errors,
+        'message': f'Undone {undone} drastic changes, {errors} errors'
+    })
+
+@app.route('/api/undo/<int:history_id>', methods=['POST'])
+def api_undo(history_id):
+    """Undo a fix - rename folder back to original name."""
+    import shutil
+
+    conn = get_db()
+    c = conn.cursor()
+
+    # Get the history record
+    c.execute('SELECT * FROM history WHERE id = ?', (history_id,))
+    record = c.fetchone()
+
+    if not record:
+        conn.close()
+        return jsonify({'success': False, 'error': 'History record not found'}), 404
+
+    old_path = record['old_path']
+    new_path = record['new_path']
+
+    # Check if the new_path exists (current location)
+    if not os.path.exists(new_path):
+        conn.close()
+        return jsonify({
+            'success': False,
+            'error': f'Current path not found: {new_path}'
+        }), 404
+
+    # Check if old_path already exists (would cause conflict)
+    if os.path.exists(old_path):
+        conn.close()
+        return jsonify({
+            'success': False,
+            'error': f'Original path already exists: {old_path}'
+        }), 409
+
+    try:
+        # Rename back to original
+        shutil.move(new_path, old_path)
+        logger.info(f"Undo: Renamed '{new_path}' back to '{old_path}'")
+
+        # Update history record
+        c.execute('''UPDATE history SET status = 'undone', error_message = 'Manually undone by user'
+                     WHERE id = ?''', (history_id,))
+
+        # Update book record back to original - use 'protected' status so deep rescan won't re-queue
+        c.execute('''UPDATE books SET
+                     current_author = ?, current_title = ?, path = ?, status = 'protected'
+                     WHERE id = ?''',
+                  (record['old_author'], record['old_title'], old_path, record['book_id']))
+
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'message': f"Undone! Renamed back to: {record['old_author']} / {record['old_title']}"
+        })
+
+    except Exception as e:
+        conn.close()
+        logger.error(f"Undo failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/stats')
 def api_stats():
@@ -1674,6 +2285,170 @@ def api_recent_history():
     return jsonify({'items': items})
 
 
+@app.route('/api/version')
+def api_version():
+    """Return current app version."""
+    return jsonify({
+        'version': APP_VERSION,
+        'repo': GITHUB_REPO
+    })
+
+@app.route('/api/check_update')
+def api_check_update():
+    """Check GitHub for newer version based on update channel."""
+    config = load_config()
+    channel = config.get('update_channel', 'stable')
+
+    try:
+        headers = {'Accept': 'application/vnd.github.v3+json'}
+
+        if channel == 'nightly':
+            # Check latest commit on main branch
+            url = f"https://api.github.com/repos/{GITHUB_REPO}/commits/main"
+            resp = requests.get(url, timeout=5, headers=headers)
+
+            if resp.status_code == 404:
+                return jsonify({
+                    'update_available': False,
+                    'current': APP_VERSION,
+                    'channel': channel,
+                    'message': 'Repository not found or not published yet'
+                })
+
+            if resp.status_code != 200:
+                return jsonify({
+                    'update_available': False,
+                    'current': APP_VERSION,
+                    'channel': channel,
+                    'error': f'GitHub API error: {resp.status_code}'
+                })
+
+            data = resp.json()
+            latest_sha = data.get('sha', '')[:7]
+            commit_msg = data.get('commit', {}).get('message', '')[:200]
+            commit_date = data.get('commit', {}).get('committer', {}).get('date', '')[:10]
+            commit_url = data.get('html_url', '')
+
+            # For nightly, check if we have a local commit hash stored
+            local_commit = config.get('local_commit_sha', '')
+
+            return jsonify({
+                'update_available': latest_sha != local_commit if local_commit else True,
+                'current': APP_VERSION + (f' ({local_commit})' if local_commit else ''),
+                'latest': f'main@{latest_sha}',
+                'latest_date': commit_date,
+                'channel': channel,
+                'release_url': commit_url,
+                'release_notes': commit_msg,
+                'message': 'Tracking latest commits on main branch' if not local_commit else None
+            })
+
+        elif channel == 'beta':
+            # Check all releases including pre-releases
+            url = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
+            resp = requests.get(url, timeout=5, headers=headers)
+
+            if resp.status_code == 404:
+                return jsonify({
+                    'update_available': False,
+                    'current': APP_VERSION,
+                    'channel': channel,
+                    'message': 'No releases found (repo may not be published yet)'
+                })
+
+            if resp.status_code != 200:
+                return jsonify({
+                    'update_available': False,
+                    'current': APP_VERSION,
+                    'channel': channel,
+                    'error': f'GitHub API error: {resp.status_code}'
+                })
+
+            releases = resp.json()
+            if not releases:
+                return jsonify({
+                    'update_available': False,
+                    'current': APP_VERSION,
+                    'channel': channel,
+                    'message': 'No releases found'
+                })
+
+            # Get the latest release (first in list, includes pre-releases)
+            latest = releases[0]
+            latest_version = latest.get('tag_name', '').lstrip('v')
+            release_url = latest.get('html_url', '')
+            release_notes = latest.get('body', '')[:500]
+            is_prerelease = latest.get('prerelease', False)
+
+            update_available = _compare_versions(APP_VERSION, latest_version)
+
+            return jsonify({
+                'update_available': update_available,
+                'current': APP_VERSION,
+                'latest': latest_version + (' (beta)' if is_prerelease else ''),
+                'channel': channel,
+                'release_url': release_url,
+                'release_notes': release_notes if update_available else None
+            })
+
+        else:  # stable (default)
+            # Check only stable releases (not pre-releases)
+            url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+            resp = requests.get(url, timeout=5, headers=headers)
+
+            if resp.status_code == 404:
+                return jsonify({
+                    'update_available': False,
+                    'current': APP_VERSION,
+                    'channel': channel,
+                    'message': 'No releases found (repo may not be published yet)'
+                })
+
+            if resp.status_code != 200:
+                return jsonify({
+                    'update_available': False,
+                    'current': APP_VERSION,
+                    'channel': channel,
+                    'error': f'GitHub API error: {resp.status_code}'
+                })
+
+            data = resp.json()
+            latest_version = data.get('tag_name', '').lstrip('v')
+            release_url = data.get('html_url', '')
+            release_notes = data.get('body', '')[:500]
+
+            update_available = _compare_versions(APP_VERSION, latest_version)
+
+            return jsonify({
+                'update_available': update_available,
+                'current': APP_VERSION,
+                'latest': latest_version,
+                'channel': channel,
+                'release_url': release_url,
+                'release_notes': release_notes if update_available else None
+            })
+
+    except Exception as e:
+        logger.debug(f"Update check failed: {e}")
+        return jsonify({
+            'update_available': False,
+            'current': APP_VERSION,
+            'channel': channel,
+            'error': str(e)
+        })
+
+def _compare_versions(current, latest):
+    """Compare semantic versions. Returns True if latest > current."""
+    def parse_version(v):
+        # Handle versions like "1.0.0-beta.1"
+        import re
+        match = re.match(r'(\d+)\.(\d+)\.(\d+)', v)
+        if match:
+            return tuple(int(x) for x in match.groups())
+        return (0, 0, 0)
+
+    return parse_version(latest) > parse_version(current)
+
 @app.route('/api/bug_report')
 def api_bug_report():
     """Generate a bug report with system info and sanitized config."""
@@ -1715,7 +2490,7 @@ def api_bug_report():
 ### System Info
 - **Python:** {sys.version}
 - **Platform:** {platform.system()} {platform.release()}
-- **App Version:** 1.0.0
+- **App Version:** {APP_VERSION}
 
 ### Configuration
 ```json

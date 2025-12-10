@@ -63,7 +63,7 @@
                         <span class="text-warning">{{ item.current_author }}</span>
                     </td>
                     <td class="text-truncate" style="max-width: 200px;">{{ item.current_title }}</td>
-                    <td><small class="badge bg-danger text-wrap" style="max-width: 200px;">{{ item.reason[:50] }}{% if item.reason|length > 50 %}...{% endif %}</small></td>
+                    <td><small class="badge bg-danger text-wrap" style="max-width: 200px;">{{ (item.reason or 'Unknown')[:50] }}{% if item.reason and item.reason|length > 50 %}...{% endif %}</small></td>
                     <td><small>{{ item.added_at[5:16] if item.added_at else '?' }}</small></td>
                     <td>
                         <button class="btn btn-sm btn-outline-secondary" onclick="removeFromQueue({{ item.id }})" title="Mark as OK">

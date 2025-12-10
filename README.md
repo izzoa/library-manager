@@ -1,65 +1,158 @@
 # Library Manager
 
-**AI-powered audiobook/ebook library metadata fixer** - Automatically detects and fixes incorrectly named book folders using LLM intelligence.
+<div align="center">
 
-![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
-![Flask](https://img.shields.io/badge/flask-2.0+-green.svg)
-![License](https://img.shields.io/badge/license-MIT-orange.svg)
+**Smart Audiobook Library Organizer with Multi-Source Metadata & AI Verification**
+
+[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
+[![Flask](https://img.shields.io/badge/flask-2.0+-green.svg)](https://flask.palletsprojects.com)
+[![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
+
+*Automatically fix messy audiobook folders using real book databases + AI intelligence*
+
+</div>
+
+---
 
 ## The Problem
 
-Audiobook and ebook libraries often end up with messy folder names from various sources:
+Audiobook libraries get messy. Downloads from various sources leave you with:
 
 ```
-Before:
+Your Library (Before):
 ├── Shards of Earth/Adrian Tchaikovsky/        # Author/Title swapped!
-├── Christopher Golden, Amber Benson/Slayers/  # Wrong author format
+├── Boyett/The Hollow Man/                     # Missing first name
+├── Christopher Golden, Amber Benson/Slayers/  # Wrong author entirely
 ├── The Expanse 2019/Leviathan Wakes/          # Year in wrong place
 ├── Tchaikovsky, Adrian/Service Model/         # LastName, FirstName format
-└── [bitsearch.to] Dean Koontz - Watchers/     # Junk in filename
+├── [bitsearch.to] Dean Koontz - Watchers/     # Junk in filename
+└── Unknown/Mistborn Book 1/                   # No author at all
 ```
 
-Manually fixing hundreds of these is tedious. Library Manager uses AI to parse messy filenames and automatically reorganize your library.
+Manually researching and fixing hundreds of these? *No thanks.*
+
+---
 
 ## The Solution
 
-Library Manager scans your library, identifies problematic folder structures, and uses AI (via OpenRouter or Google Gemini) to intelligently parse and fix them:
+Library Manager combines **4 real book databases** with **AI verification** to intelligently fix your library:
 
 ```
-After:
+Your Library (After):
 ├── Adrian Tchaikovsky/Shards of Earth/        # ✓ Correct!
-├── Christopher Golden/Slayers/                # ✓ Fixed
+├── Steven Boyett/The Hollow Man/              # ✓ Full name found
+├── Christopher Golden/Slayers/                # ✓ Fixed author
 ├── James S.A. Corey/Leviathan Wakes/          # ✓ Proper author
 ├── Adrian Tchaikovsky/Service Model/          # ✓ Name normalized
-└── Dean Koontz/Watchers/                      # ✓ Cleaned up
+├── Dean Koontz/Watchers/                      # ✓ Cleaned up
+└── Brandon Sanderson/The Final Empire/        # ✓ Found the real book!
 ```
+
+---
+
+## How It Works
+
+### Multi-Source Metadata Pipeline
+
+Library Manager doesn't just guess—it **verifies against real book databases**:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        METADATA PIPELINE                            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│   Your Messy Folder ──► Search APIs ──► Verify ──► Rename          │
+│                              │                                      │
+│                              ▼                                      │
+│                    ┌─────────────────┐                             │
+│                    │  1. Audnexus    │  Audible's audiobook data   │
+│                    │  2. OpenLibrary │  Massive book database      │
+│                    │  3. Google Books│  Wide coverage              │
+│                    │  4. Hardcover   │  Modern/indie books         │
+│                    │  5. AI Fallback │  When APIs can't find it    │
+│                    └─────────────────┘                             │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Smart Verification System
+
+When metadata is found, the system verifies it makes sense:
+
+| Scenario | What Happens |
+|----------|--------------|
+| **Minor change** (e.g., "Boyett" → "Steven Boyett") | Auto-applied (same person, fuller name) |
+| **Drastic change** (e.g., "Golden" → "Sussman") | **Requires manual approval** to prevent mistakes |
+| **Author/Title swap** (e.g., "Title/Author") | Detected and fixed automatically |
+| **Uncertain match** | Held for review, never auto-applied |
+
+### Safety First
+
+- **Drastic author changes ALWAYS require approval** - even in auto-fix mode
+- **Undo any fix** - Every rename can be reverted with one click
+- **History tracking** - See every change that was made
+- **Reject bad suggestions** - Delete wrong AI guesses without applying them
+
+---
 
 ## Features
 
-- **Web Dashboard** - Beautiful dark-themed UI to monitor and control everything
-- **Smart Detection** - Automatically flags suspicious folder names (years in author, swapped fields, etc.)
-- **AI-Powered Parsing** - Uses LLMs to intelligently extract author/title from messy filenames
-- **Batch Processing** - Process multiple books at once with rate limiting
-- **Series Preservation** - Keeps "Book 1", "Book 2" etc. in titles
-- **Co-Author Support** - Properly handles multiple authors
-- **History Tracking** - See every fix made with before/after comparison
-- **Auto or Manual Mode** - Let it run automatically or approve each fix
-- **Background Worker** - Periodic scanning on configurable schedule
+### Web Dashboard
+Beautiful dark-themed UI showing:
+- Library statistics (total books, queue size, fixes)
+- Quick action buttons (Scan, Process, Apply Pending)
+- Worker status indicator (running/stopped)
+- Recent activity feed
+- 7-day stats graph
 
-## Screenshots
+### Processing Queue
+- View all books flagged for review
+- Live processing log
+- Progress tracking for bulk operations
+- Remove items from queue (mark as OK)
 
-The dashboard shows your library stats, recent fixes, and quick actions:
+### Fix History
+- Complete log of all changes
+- Before/After comparison
+- **Undo button** - Revert any fix instantly
+- Status badges (Applied, Pending, Undone, Error)
 
-| Dashboard | Queue | History |
-|-----------|-------|---------|
-| Total books, queue size, fixes | Books flagged for review | All fixes with before/after |
+### Pending Approvals
+- Dedicated page for fixes needing manual review
+- **"Review" badge** highlights drastic author changes
+- **Apply** (✓) or **Reject** (✗) each suggestion
+- Bulk apply all pending fixes
+
+### Customizable Naming Formats
+
+Choose the folder structure that matches your player:
+
+| Format | Example | Compatible With |
+|--------|---------|-----------------|
+| `Author/Title` | `Brandon Sanderson/Mistborn/` | Audiobookshelf, Plex, Jellyfin |
+| `Author - Title` | `Brandon Sanderson - Mistborn/` | Booksonic, basic players |
+| `Author/Series/Title` | `Brandon Sanderson/Mistborn/The Final Empire/` | Organized libraries |
+
+### AI Providers
+
+**Google Gemini** (Recommended)
+- 14,400 free API calls/day
+- Fast and accurate
+- Get key at [aistudio.google.com](https://aistudio.google.com)
+
+**OpenRouter**
+- Access to multiple models
+- Free tier available
+- Supports Claude, GPT-4, Llama, etc.
+
+---
 
 ## Quick Start
 
-### 1. Clone and Install
+### 1. Install
 
 ```bash
-git clone https://github.com/yourusername/library-manager.git
+git clone https://github.com/deucebucket/library-manager.git
 cd library-manager
 pip install -r requirements.txt
 ```
@@ -70,106 +163,100 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open http://localhost:5060 in your browser.
+Open **http://localhost:5060** in your browser.
 
-### 3. Configure via Settings UI
+### 3. Configure (via Web UI)
 
-1. Click **Settings** in the navigation
-2. Add your **library paths** (one per line)
-3. Add your **OpenRouter API key** (free at [openrouter.ai](https://openrouter.ai))
-4. Click **Save Settings**
-5. Go to **Dashboard** and click **Scan Library**
+1. Go to **Settings**
+2. Add your **library path** (e.g., `/mnt/audiobooks`)
+3. Choose **AI Provider** and add API key
+4. **Save Settings**
+5. Go to **Dashboard** → **Scan Library**
 
-That's it! No need to edit config files manually - everything is configured through the web UI.
+That's it! Watch as your messy library gets organized.
 
-### Alternative: Manual Configuration
+---
 
-If you prefer editing files directly:
+## Configuration
 
-```bash
-cp config.example.json config.json
-cp secrets.example.json secrets.json
+### Settings Tabs
+
+| Tab | Contents |
+|-----|----------|
+| **General** | Library paths, naming format, auto-fix toggle, scan interval |
+| **AI Setup** | Provider selection, API keys, model choice |
+| **Advanced** | Danger zone (reset database, clear history) |
+| **Tools** | Bug report generator, live logs |
+
+### Key Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `library_paths` | `[]` | Folders to scan (one per line) |
+| `naming_format` | `author/title` | How to structure renamed folders |
+| `auto_fix` | `false` | Apply fixes automatically vs manual approval |
+| `protect_author_changes` | `true` | Extra verification for drastic changes |
+| `scan_interval_hours` | `6` | Auto-scan frequency |
+| `batch_size` | `3` | Books per API batch |
+| `max_requests_per_hour` | `120` | Rate limiting |
+
+---
+
+## How Detection Works
+
+Books get flagged for review when they have:
+
+| Issue | Example | Detection |
+|-------|---------|-----------|
+| Year in author | `The Expanse 2019/Leviathan` | Regex: 1950-2030 |
+| Swapped fields | `Mistborn/Brandon Sanderson` | Title looks like name |
+| LastName, First | `Tchaikovsky, Adrian/Book` | Comma detection |
+| Missing author | `Unknown/The Book Title` | Common placeholder |
+| Junk in name | `[site.to] Author - Book` | Brackets, URLs |
+| Title words in author | `The Brandon Sanderson/Book` | Articles in wrong place |
+
+---
+
+## API Pipeline Details
+
+### Search Order
+
+1. **Audnexus** - Audible's audiobook database (best for audiobooks)
+2. **OpenLibrary** - Internet Archive's massive book DB
+3. **Google Books** - Wide coverage, good metadata
+4. **Hardcover** - Modern and indie titles
+5. **AI Fallback** - When no API finds a match
+
+### Verification Flow
+
+```
+API finds "Paul Sussman / The Lost Army of Cambyses"
+for your folder "Christopher Golden / The Lost Army"
+
+                    ↓
+
+Is author completely different? YES → DRASTIC CHANGE DETECTED
+
+                    ↓
+
+Run verification: Search ALL APIs, have AI vote on best match
+
+                    ↓
+
+AI uncertain or says WRONG? → Goes to PENDING (requires your approval)
+AI confident it's correct? → Still goes to PENDING (drastic = always review)
 ```
 
-**config.json:**
-```json
-{
-  "library_paths": ["/path/to/your/audiobooks"],
-  "openrouter_model": "google/gemma-3n-e4b-it:free",
-  "scan_interval_hours": 6,
-  "batch_size": 3,
-  "auto_fix": false,
-  "enabled": true
-}
-```
-
-**secrets.json:**
-```json
-{
-  "openrouter_api_key": "sk-or-v1-your-key-here"
-}
-```
-
-## AI Providers
-
-Library Manager supports multiple AI providers:
-
-### OpenRouter (Recommended)
-- Get a free API key at [openrouter.ai](https://openrouter.ai)
-- Uses `google/gemma-3n-e4b-it:free` by default (completely free!)
-- Can also use Claude, GPT-4, etc. for better accuracy
-
-### Google Gemini
-- Get an API key from [Google AI Studio](https://aistudio.google.com)
-- Add `gemini_api_key` to your secrets.json
-
-## Library Structure
-
-Library Manager expects your library to follow this structure:
-
-```
-/your/library/path/
-├── Author Name/
-│   ├── Book Title/
-│   │   └── audiobook.m4b
-│   └── Another Book/
-│       └── audiobook.mp3
-└── Another Author/
-    └── Their Book/
-        └── book.m4b
-```
-
-This is the standard structure used by:
-- Audiobookshelf
-- Plex Audiobooks
-- Most audiobook managers
-
-## How It Works
-
-1. **Scan** - Walks through your library finding all Author/Title folders
-2. **Detect** - Flags folders that look wrong (year in author, swapped fields, etc.)
-3. **Queue** - Adds suspicious books to a processing queue
-4. **Parse** - Sends batches to AI for intelligent parsing
-5. **Fix** - Renames folders to correct structure (if auto_fix enabled)
-6. **Track** - Records all changes in history for review
-
-### Detection Rules
-
-Books are flagged if they have:
-- Years (1950-2030) in the author name
-- Common title words ("The", "of", "and") in author
-- Title that looks like a person's name (swapped fields)
-- Comma in author name (LastName, FirstName format)
-- Format indicators in author (epub, mp3, [brackets])
+---
 
 ## Production Deployment
 
 ### Systemd Service
 
 ```bash
-sudo tee /etc/systemd/system/library-manager.service << EOF
+sudo tee /etc/systemd/system/library-manager.service << 'EOF'
 [Unit]
-Description=Library Manager
+Description=Library Manager - Audiobook Organizer
 After=network.target
 
 [Service]
@@ -178,6 +265,7 @@ User=yourusername
 WorkingDirectory=/path/to/library-manager
 ExecStart=/usr/bin/python3 app.py
 Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
@@ -186,7 +274,7 @@ EOF
 sudo systemctl enable --now library-manager
 ```
 
-### Nginx Reverse Proxy (with SSL)
+### Nginx Reverse Proxy
 
 ```nginx
 server {
@@ -200,41 +288,67 @@ server {
         proxy_pass http://127.0.0.1:5060;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
-## API Endpoints
+---
+
+## API Reference
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/scan` | POST | Trigger library scan |
-| `/api/process` | POST | Process queue (supports `{all: true}` or `{limit: N}`) |
+| `/api/deep_rescan` | POST | Re-verify ALL books with fresh metadata |
+| `/api/process` | POST | Process queue (`{all: true}` or `{limit: N}`) |
 | `/api/queue` | GET | Get current queue items |
-| `/api/stats` | GET | Get dashboard statistics |
+| `/api/stats` | GET | Dashboard statistics |
+| `/api/apply_fix/{id}` | POST | Apply a pending fix |
+| `/api/reject_fix/{id}` | POST | Reject/delete a bad suggestion |
+| `/api/undo/{id}` | POST | Revert an applied fix |
+| `/api/apply_all_pending` | POST | Apply all pending fixes at once |
 | `/api/worker/start` | POST | Start background worker |
 | `/api/worker/stop` | POST | Stop background worker |
 
-## Configuration Options
+---
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `library_paths` | `[]` | List of library root paths to scan |
-| `openrouter_model` | `google/gemma-3n-e4b-it:free` | AI model to use |
-| `scan_interval_hours` | `6` | How often to auto-scan |
-| `batch_size` | `3` | Books per AI request |
-| `max_requests_per_hour` | `30` | Rate limiting |
-| `auto_fix` | `false` | Automatically apply fixes |
-| `enabled` | `true` | Enable background processing |
+## Troubleshooting
+
+### "Wrong author detected"
+1. Go to **Pending** page
+2. Find the incorrect suggestion
+3. Click **✗ Reject** to delete it
+4. The book will be marked as "verified OK"
+
+### "Want to undo a fix"
+1. Go to **History**
+2. Find the change you want to revert
+3. Click the **↩ Undo** button
+4. Folder will be renamed back to original
+
+### "Deep rescan everything"
+1. Go to **Dashboard**
+2. Click **Deep Re-scan (Verify All)**
+3. This queues ALL books for fresh metadata verification
+4. Useful after updating API keys or fixing bugs
+
+---
 
 ## Contributing
 
-Pull requests welcome! Some ideas:
-- Support for more AI providers (Ollama, local LLMs)
-- Undo/revert functionality
-- Dry-run mode with preview
-- Integration with Audiobookshelf API
-- Support for different library structures
+Ideas for future development:
+- [ ] Ollama/local LLM support
+- [ ] Audiobookshelf API integration
+- [ ] Cover art fetching
+- [ ] Metadata embedding in files
+- [ ] Multi-user support
+- [ ] Docker container
+
+Pull requests welcome!
+
+---
 
 ## License
 
@@ -242,4 +356,10 @@ MIT License - do whatever you want with it.
 
 ---
 
-Built with Claude Code
+<div align="center">
+
+**Built with [Claude Code](https://claude.ai/code)**
+
+*Making messy audiobook libraries beautiful since 2024*
+
+</div>

@@ -2,346 +2,403 @@
 {% block title %}Settings - Library Manager{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-3">
     <h2><i class="bi bi-gear"></i> Settings</h2>
+    <span class="text-muted">v{{ version }}</span>
 </div>
 
-<form method="POST">
+<!-- Quick Tutorial -->
+<div class="alert alert-info alert-dismissible fade show mb-4" role="alert">
+    <h5 class="alert-heading"><i class="bi bi-lightbulb"></i> How It Works</h5>
+    <hr>
     <div class="row">
-        <div class="col-md-6">
-            <div class="card mb-4">
-                <div class="card-header">
-                    <i class="bi bi-folder"></i> Library Paths
-                </div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label">Paths to Scan (one per line)</label>
-                        <textarea class="form-control bg-dark text-light" name="library_paths" rows="4"
-                                  placeholder="/mnt/rag_data/audiobooks">{{ config.library_paths | join('\n') }}</textarea>
-                        <small class="text-muted">Full paths to your audiobook library folders</small>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card mb-4">
-                <div class="card-header">
-                    <i class="bi bi-robot"></i> AI Configuration
-                </div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label">AI Provider</label>
-                        <select class="form-select bg-dark text-light" name="ai_provider" id="ai_provider" onchange="toggleProviderFields()">
-                            <option value="openrouter" {% if config.ai_provider == 'openrouter' %}selected{% endif %}>
-                                OpenRouter (Free models available)
-                            </option>
-                            <option value="gemini" {% if config.ai_provider == 'gemini' %}selected{% endif %}>
-                                Google Gemini (Direct API)
-                            </option>
-                        </select>
-                    </div>
-
-                    <!-- OpenRouter Settings -->
-                    <div id="openrouter-settings">
-                        <div class="mb-3">
-                            <label class="form-label">OpenRouter API Key</label>
-                            <input type="password" class="form-control bg-dark text-light" name="openrouter_api_key"
-                                   value="{{ config.openrouter_api_key or '' }}" placeholder="sk-or-v1-...">
-                            <small class="text-muted">Get free key at <a href="https://openrouter.ai" target="_blank">openrouter.ai</a></small>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">OpenRouter Model</label>
-                            <select class="form-select bg-dark text-light" name="openrouter_model">
-                                <option value="google/gemma-3n-e4b-it:free" {% if config.openrouter_model == 'google/gemma-3n-e4b-it:free' %}selected{% endif %}>
-                                    Google Gemma 3N (Free)
-                                </option>
-                                <option value="google/gemini-2.0-flash-exp:free" {% if config.openrouter_model == 'google/gemini-2.0-flash-exp:free' %}selected{% endif %}>
-                                    Google Gemini 2.0 Flash (Free)
-                                </option>
-                                <option value="meta-llama/llama-3.3-70b-instruct:free" {% if config.openrouter_model == 'meta-llama/llama-3.3-70b-instruct:free' %}selected{% endif %}>
-                                    Llama 3.3 70B (Free)
-                                </option>
-                                <option value="mistralai/devstral-2512:free" {% if config.openrouter_model == 'mistralai/devstral-2512:free' %}selected{% endif %}>
-                                    Mistral Devstral (Free)
-                                </option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <!-- Gemini Settings -->
-                    <div id="gemini-settings">
-                        <div class="mb-3">
-                            <label class="form-label">Gemini API Key</label>
-                            <input type="password" class="form-control bg-dark text-light" name="gemini_api_key"
-                                   value="{{ config.gemini_api_key or '' }}" placeholder="AIza...">
-                            <small class="text-muted">Get at <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a> - Free tier available</small>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Gemini Model</label>
-                            <select class="form-select bg-dark text-light" name="gemini_model">
-                                <optgroup label="Recommended (14,400/day)">
-                                    <option value="gemma-3-27b-it" {% if config.gemini_model == 'gemma-3-27b-it' %}selected{% endif %}>
-                                        Gemma 3 27B (Best quality, huge quota) ⭐
-                                    </option>
-                                    <option value="gemma-3-12b-it" {% if config.gemini_model == 'gemma-3-12b-it' %}selected{% endif %}>
-                                        Gemma 3 12B (Good balance)
-                                    </option>
-                                    <option value="gemma-3-4b-it" {% if config.gemini_model == 'gemma-3-4b-it' %}selected{% endif %}>
-                                        Gemma 3 4B (Fast)
-                                    </option>
-                                </optgroup>
-                                <optgroup label="Gemini Flash (20/day)">
-                                    <option value="gemini-2.5-flash-lite" {% if config.gemini_model == 'gemini-2.5-flash-lite' %}selected{% endif %}>
-                                        Gemini 2.5 Flash Lite
-                                    </option>
-                                    <option value="gemini-2.5-flash" {% if config.gemini_model == 'gemini-2.5-flash' %}selected{% endif %}>
-                                        Gemini 2.5 Flash
-                                    </option>
-                                    <option value="gemini-2.0-flash-lite" {% if config.gemini_model == 'gemini-2.0-flash-lite' %}selected{% endif %}>
-                                        Gemini 2.0 Flash Lite
-                                    </option>
-                                    <option value="gemini-2.0-flash" {% if config.gemini_model == 'gemini-2.0-flash' %}selected{% endif %}>
-                                        Gemini 2.0 Flash
-                                    </option>
-                                </optgroup>
-                                <optgroup label="Pro (Lower quota)">
-                                    <option value="gemini-2.5-pro" {% if config.gemini_model == 'gemini-2.5-pro' %}selected{% endif %}>
-                                        Gemini 2.5 Pro (Best quality)
-                                    </option>
-                                </optgroup>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            </div>
+        <div class="col-md-4">
+            <strong>1. Scan</strong><br>
+            <small>Finds audiobook folders with messy names like:<br>
+            <code>Unknown/Mistborn Book 1</code></small>
         </div>
-
-        <div class="col-md-6">
-            <div class="card mb-4">
-                <div class="card-header">
-                    <i class="bi bi-clock"></i> Scheduling
-                </div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label">Scan Interval (hours)</label>
-                        <input type="number" class="form-control bg-dark text-light" name="scan_interval_hours"
-                               value="{{ config.scan_interval_hours }}" min="1" max="168">
-                        <small class="text-muted">How often to scan for new/changed books</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Batch Size</label>
-                        <input type="number" class="form-control bg-dark text-light" name="batch_size"
-                               value="{{ config.batch_size }}" min="1" max="10">
-                        <small class="text-muted">Books per AI request</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Max API Calls Per Hour</label>
-                        <input type="number" class="form-control bg-dark text-light" name="max_requests_per_hour"
-                               value="{{ config.max_requests_per_hour }}" min="1" max="100">
-                    </div>
-                </div>
-            </div>
-
-            <div class="card mb-4">
-                <div class="card-header">
-                    <i class="bi bi-toggles"></i> Behavior
-                </div>
-                <div class="card-body">
-                    <div class="form-check form-switch mb-3">
-                        <input class="form-check-input" type="checkbox" name="enabled" id="enabled"
-                               {% if config.enabled %}checked{% endif %}>
-                        <label class="form-check-label" for="enabled">
-                            <strong>Enable Background Processing</strong><br>
-                            <small class="text-muted">Automatically scan and queue suspicious books</small>
-                        </label>
-                    </div>
-                    <div class="form-check form-switch mb-3">
-                        <input class="form-check-input" type="checkbox" name="auto_fix" id="auto_fix"
-                               {% if config.auto_fix %}checked{% endif %} onchange="warnAutoFix(this)">
-                        <label class="form-check-label" for="auto_fix">
-                            <strong>Auto-Fix Mode</strong> <span class="badge bg-warning text-dark">Caution</span><br>
-                            <small class="text-muted">Automatically rename folders without approval</small><br>
-                            <small class="text-danger"><i class="bi bi-exclamation-triangle"></i> This will modify your library files directly!</small>
-                        </label>
-                    </div>
-                </div>
-            </div>
+        <div class="col-md-4">
+            <strong>2. Lookup & Verify</strong><br>
+            <small>Searches 4 book databases + AI to find correct metadata with smart verification</small>
+        </div>
+        <div class="col-md-4">
+            <strong>3. Fix</strong><br>
+            <small>Renames to clean format:<br>
+            <code>Brandon Sanderson/The Final Empire</code></small>
         </div>
     </div>
-
-    <div class="row">
-        <div class="col-12">
-            <div class="card mb-4">
-                <div class="card-header">
-                    <i class="bi bi-cloud-download"></i> Book Metadata Sources
-                    <span class="badge bg-success float-end">All Free - No Setup Required</span>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted mb-3">
-                        Metadata is looked up automatically from these sources (in order). No API keys required!
-                    </p>
-                    <table class="table table-sm table-dark">
-                        <thead>
-                            <tr><th>Source</th><th>Best For</th><th>Status</th><th>Optional API Key</th></tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td><strong>Audnexus</strong></td>
-                                <td>Audiobooks (from Audible)</td>
-                                <td><span class="badge bg-success">Active</span></td>
-                                <td><small class="text-muted">Not needed</small></td>
-                            </tr>
-                            <tr>
-                                <td><strong>OpenLibrary</strong></td>
-                                <td>General books</td>
-                                <td><span class="badge bg-success">Active</span></td>
-                                <td><small class="text-muted">Not needed</small></td>
-                            </tr>
-                            <tr>
-                                <td><strong>Google Books</strong></td>
-                                <td>Wide coverage</td>
-                                <td><span class="badge bg-success">Active</span></td>
-                                <td>
-                                    <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-info">
-                                        Get key (optional, higher limits)
-                                    </a>
-                                </td>
-                            </tr>
-                            <tr>
-                                <td><strong>Hardcover</strong></td>
-                                <td>Indie/modern books</td>
-                                <td><span class="badge bg-success">Active</span></td>
-                                <td><small class="text-muted">Not needed</small></td>
-                            </tr>
-                            <tr>
-                                <td><strong>AI Fallback</strong></td>
-                                <td>When APIs fail</td>
-                                <td><span class="badge bg-info">Fallback</span></td>
-                                <td><small class="text-muted">Uses selected AI model</small></td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <div class="mb-3">
-                        <label class="form-label">Google Books API Key <small class="text-muted">(optional - for higher rate limits)</small></label>
-                        <input type="password" class="form-control bg-dark text-light" name="google_books_api_key"
-                               value="{{ config.google_books_api_key or '' }}" placeholder="Leave empty to use without key">
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
-        <button type="submit" class="btn btn-primary btn-lg">
-            <i class="bi bi-save"></i> Save Settings
-        </button>
-    </div>
-</form>
-
-<div class="card mt-4">
-    <div class="card-header">
-        <i class="bi bi-terminal"></i> Recent Logs
-        <button class="btn btn-sm btn-outline-secondary float-end" onclick="refreshLogs()">
-            <i class="bi bi-arrow-clockwise"></i> Refresh
-        </button>
-    </div>
-    <div class="card-body bg-dark p-2" style="max-height: 300px; overflow-y: auto;">
-        <pre id="log-output" class="mb-0 text-light" style="font-size: 0.8rem; white-space: pre-wrap;">Loading logs...</pre>
-    </div>
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 
-<div class="card mt-4">
-    <div class="card-header">
-        <i class="bi bi-bug"></i> Bug Report
+<!-- Main Settings Form -->
+<form method="POST" id="settings-form">
+    <!-- Nav Tabs -->
+    <ul class="nav nav-tabs mb-3" role="tablist">
+        <li class="nav-item">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-general" type="button">
+                <i class="bi bi-sliders"></i> General
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ai" type="button">
+                <i class="bi bi-robot"></i> AI Setup
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-advanced" type="button">
+                <i class="bi bi-gear-wide-connected"></i> Advanced
+            </button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-tools" type="button">
+                <i class="bi bi-tools"></i> Tools
+            </button>
+        </li>
+    </ul>
+
+    <!-- Tab Content -->
+    <div class="tab-content">
+        <!-- General Tab -->
+        <div class="tab-pane fade show active" id="tab-general">
+            <div class="row">
+                <div class="col-lg-6">
+                    <!-- Library Settings -->
+                    <div class="card mb-3">
+                        <div class="card-header py-2">
+                            <i class="bi bi-folder"></i> Library
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label">Library Paths <small class="text-muted">(one per line)</small></label>
+                                <textarea class="form-control bg-dark text-light" name="library_paths" rows="2"
+                                          placeholder="/mnt/audiobooks">{{ config.library_paths | join('\n') }}</textarea>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label">Folder Naming Format</label>
+                                <select class="form-select bg-dark text-light" name="naming_format">
+                                    <option value="author/title" {% if config.naming_format == 'author/title' or not config.naming_format %}selected{% endif %}>
+                                        Author/Title - Audiobookshelf, Plex, Jellyfin
+                                    </option>
+                                    <option value="author - title" {% if config.naming_format == 'author - title' %}selected{% endif %}>
+                                        Author - Title (flat) - Booksonic, basic players
+                                    </option>
+                                    <option value="author/series/title" {% if config.naming_format == 'author/series/title' %}selected{% endif %}>
+                                        Author/Series/Title - organized but less compatible
+                                    </option>
+                                </select>
+                                <div class="mt-2 small">
+                                    <table class="table table-sm table-dark mb-0" style="font-size: 0.8rem;">
+                                        <thead><tr><th>Before</th><th></th><th>After</th></tr></thead>
+                                        <tbody>
+                                            <tr>
+                                                <td><code>Unknown/Mistborn Book 1</code></td>
+                                                <td><i class="bi bi-arrow-right text-info"></i></td>
+                                                <td><code>Brandon Sanderson/The Final Empire</code></td>
+                                            </tr>
+                                            <tr>
+                                                <td><code>Alien Clay/Adrian Tchaikovsky</code></td>
+                                                <td><i class="bi bi-arrow-right text-info"></i></td>
+                                                <td><code>Adrian Tchaikovsky/Alien Clay</code></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Behavior -->
+                    <div class="card mb-3">
+                        <div class="card-header py-2">
+                            <i class="bi bi-toggles"></i> Behavior
+                        </div>
+                        <div class="card-body">
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" name="enabled" id="enabled"
+                                       {% if config.enabled %}checked{% endif %}>
+                                <label class="form-check-label" for="enabled">
+                                    <strong>Enable Background Processing</strong>
+                                </label>
+                            </div>
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" name="auto_fix" id="auto_fix"
+                                       {% if config.auto_fix %}checked{% endif %} onchange="warnAutoFix(this)">
+                                <label class="form-check-label" for="auto_fix">
+                                    <strong>Auto-Fix Mode</strong>
+                                    <span class="badge bg-warning text-dark">Caution</span>
+                                    <br><small class="text-muted">Rename folders automatically without approval</small>
+                                </label>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="protect_author_changes" id="protect_author_changes"
+                                       {% if config.protect_author_changes %}checked{% endif %}>
+                                <label class="form-check-label" for="protect_author_changes">
+                                    <strong>Smart Verification</strong>
+                                    <span class="badge bg-success">Recommended</span>
+                                    <br><small class="text-muted">Extra verification when author changes completely</small>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-6">
+                    <!-- Processing -->
+                    <div class="card mb-3">
+                        <div class="card-header py-2">
+                            <i class="bi bi-speedometer2"></i> Processing
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-6 mb-2">
+                                    <label class="form-label">Scan Interval</label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" class="form-control bg-dark text-light" name="scan_interval_hours"
+                                               value="{{ config.scan_interval_hours }}" min="1" max="168">
+                                        <span class="input-group-text bg-dark text-light">hours</span>
+                                    </div>
+                                </div>
+                                <div class="col-6 mb-2">
+                                    <label class="form-label">Batch Size</label>
+                                    <input type="number" class="form-control form-control-sm bg-dark text-light" name="batch_size"
+                                           value="{{ config.batch_size }}" min="1" max="10">
+                                </div>
+                            </div>
+                            <div class="mb-0">
+                                <label class="form-label">Max API Calls/Hour</label>
+                                <input type="number" class="form-control form-control-sm bg-dark text-light" name="max_requests_per_hour"
+                                       value="{{ config.max_requests_per_hour }}" min="1" max="500" style="max-width: 120px;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Updates -->
+                    <div class="card mb-3">
+                        <div class="card-header py-2">
+                            <i class="bi bi-arrow-repeat"></i> Updates
+                        </div>
+                        <div class="card-body py-2">
+                            <div class="d-flex align-items-center gap-2">
+                                <select class="form-select form-select-sm bg-dark text-light" name="update_channel" style="max-width: 180px;">
+                                    <option value="stable" {% if config.update_channel == 'stable' %}selected{% endif %}>Stable</option>
+                                    <option value="beta" {% if config.update_channel == 'beta' %}selected{% endif %}>Beta</option>
+                                    <option value="nightly" {% if config.update_channel == 'nightly' %}selected{% endif %}>Nightly</option>
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-info" onclick="checkUpdateNow()">
+                                    <i class="bi bi-arrow-clockwise"></i> Check
+                                </button>
+                                <span id="update-status"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Setup Tab -->
+        <div class="tab-pane fade" id="tab-ai">
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="card mb-3">
+                        <div class="card-header py-2">
+                            <i class="bi bi-robot"></i> AI Provider
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <select class="form-select bg-dark text-light" name="ai_provider" id="ai_provider" onchange="toggleProviderFields()">
+                                    <option value="gemini" {% if config.ai_provider == 'gemini' %}selected{% endif %}>
+                                        Google Gemini (Recommended - 14,400 free calls/day)
+                                    </option>
+                                    <option value="openrouter" {% if config.ai_provider == 'openrouter' %}selected{% endif %}>
+                                        OpenRouter (Free models available)
+                                    </option>
+                                </select>
+                            </div>
+
+                            <!-- Gemini Settings -->
+                            <div id="gemini-settings">
+                                <div class="mb-3">
+                                    <label class="form-label">Gemini API Key</label>
+                                    <input type="password" class="form-control bg-dark text-light" name="gemini_api_key"
+                                           value="{{ config.gemini_api_key or '' }}" placeholder="AIza...">
+                                    <small class="text-muted">Free at <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a></small>
+                                </div>
+                                <div class="mb-0">
+                                    <label class="form-label">Model</label>
+                                    <select class="form-select bg-dark text-light" name="gemini_model">
+                                        <option value="gemma-3-27b-it" {% if config.gemini_model == 'gemma-3-27b-it' %}selected{% endif %}>
+                                            Gemma 3 27B (Best - 14,400/day)
+                                        </option>
+                                        <option value="gemma-3-12b-it" {% if config.gemini_model == 'gemma-3-12b-it' %}selected{% endif %}>
+                                            Gemma 3 12B (Faster)
+                                        </option>
+                                        <option value="gemini-2.0-flash" {% if config.gemini_model == 'gemini-2.0-flash' %}selected{% endif %}>
+                                            Gemini 2.0 Flash (Lower quota)
+                                        </option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- OpenRouter Settings -->
+                            <div id="openrouter-settings" style="display: none;">
+                                <div class="mb-3">
+                                    <label class="form-label">OpenRouter API Key</label>
+                                    <input type="password" class="form-control bg-dark text-light" name="openrouter_api_key"
+                                           value="{{ config.openrouter_api_key or '' }}" placeholder="sk-or-v1-...">
+                                    <small class="text-muted">Get at <a href="https://openrouter.ai" target="_blank">openrouter.ai</a></small>
+                                </div>
+                                <div class="mb-0">
+                                    <label class="form-label">Model</label>
+                                    <select class="form-select bg-dark text-light" name="openrouter_model">
+                                        <option value="google/gemma-3n-e4b-it:free" {% if config.openrouter_model == 'google/gemma-3n-e4b-it:free' %}selected{% endif %}>
+                                            Google Gemma 3N (Free)
+                                        </option>
+                                        <option value="meta-llama/llama-3.3-70b-instruct:free" {% if config.openrouter_model == 'meta-llama/llama-3.3-70b-instruct:free' %}selected{% endif %}>
+                                            Llama 3.3 70B (Free)
+                                        </option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-6">
+                    <div class="card mb-3">
+                        <div class="card-header py-2">
+                            <i class="bi bi-cloud-download"></i> Book Metadata Sources
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-2">Searches these APIs in order (all free, no setup needed):</p>
+                            <ol class="small mb-3">
+                                <li><strong>Audnexus</strong> - Audiobooks (from Audible)</li>
+                                <li><strong>OpenLibrary</strong> - General books</li>
+                                <li><strong>Google Books</strong> - Wide coverage</li>
+                                <li><strong>Hardcover</strong> - Indie/modern books</li>
+                                <li><strong>AI Fallback</strong> - When APIs fail</li>
+                            </ol>
+                            <div class="mb-0">
+                                <label class="form-label small">Google Books API Key <span class="text-muted">(optional)</span></label>
+                                <input type="password" class="form-control form-control-sm bg-dark text-light" name="google_books_api_key"
+                                       value="{{ config.google_books_api_key or '' }}" placeholder="For higher rate limits">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Advanced Tab -->
+        <div class="tab-pane fade" id="tab-advanced">
+            <div class="row">
+                <div class="col-12">
+                    <!-- Danger Zone -->
+                    <div class="card mb-3 border-danger" style="max-width: 500px;">
+                        <div class="card-header py-2 text-danger">
+                            <i class="bi bi-exclamation-triangle"></i> Danger Zone
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-2">Use with caution. These actions cannot be undone.</p>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearHistory()">
+                                    <i class="bi bi-trash"></i> Clear History
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="resetDatabase()">
+                                    <i class="bi bi-arrow-counterclockwise"></i> Reset Database
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tools Tab -->
+        <div class="tab-pane fade" id="tab-tools">
+            <div class="row">
+                <div class="col-lg-6">
+                    <!-- Bug Report -->
+                    <div class="card mb-3">
+                        <div class="card-header py-2">
+                            <i class="bi bi-bug"></i> Bug Report
+                        </div>
+                        <div class="card-body py-2">
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="generateBugReport()">
+                                    <i class="bi bi-clipboard"></i> Generate Report
+                                </button>
+                                <a href="https://github.com/deucebucket/library-manager/issues/new" target="_blank" class="btn btn-sm btn-outline-secondary">
+                                    <i class="bi bi-github"></i> GitHub Issues
+                                </a>
+                            </div>
+                            <div id="bug-report-output" class="mt-2 d-none">
+                                <textarea class="form-control form-control-sm bg-dark text-light" id="bug-report-text" rows="6" readonly></textarea>
+                                <button type="button" class="btn btn-sm btn-success mt-1" onclick="copyBugReport()">
+                                    <i class="bi bi-clipboard-check"></i> Copy
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-6">
+                    <!-- Recent Logs -->
+                    <div class="card mb-3">
+                        <div class="card-header py-2">
+                            <i class="bi bi-terminal"></i> Recent Logs
+                            <button type="button" class="btn btn-sm btn-outline-secondary float-end py-0" onclick="refreshLogs()">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                        </div>
+                        <div class="card-body bg-dark p-2" style="max-height: 300px; overflow-y: auto;">
+                            <pre id="log-output" class="mb-0 text-light" style="font-size: 0.7rem; white-space: pre-wrap;">Loading...</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-    <div class="card-body">
-        <p class="text-muted mb-3">Having issues? Generate a bug report to share with the developer.</p>
-        <button class="btn btn-outline-primary" onclick="generateBugReport()">
-            <i class="bi bi-clipboard"></i> Generate Bug Report
-        </button>
-        <a href="https://github.com/deucebucket/library-manager/issues/new" target="_blank" class="btn btn-outline-secondary ms-2">
-            <i class="bi bi-github"></i> Open GitHub Issue
-        </a>
-        <div id="bug-report-output" class="mt-3 d-none">
-            <label class="form-label">Copy this to your GitHub issue:</label>
-            <textarea class="form-control bg-dark text-light" id="bug-report-text" rows="10" readonly></textarea>
-            <button class="btn btn-sm btn-success mt-2" onclick="copyBugReport()">
-                <i class="bi bi-clipboard-check"></i> Copy to Clipboard
+
+    <!-- Save Button (sticky) -->
+    <div class="position-sticky bottom-0 bg-dark py-3 border-top mt-3" style="z-index: 100;">
+        <div class="d-flex justify-content-end">
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save"></i> Save Settings
             </button>
         </div>
     </div>
-</div>
-
-<div class="card mt-4">
-    <div class="card-header text-danger">
-        <i class="bi bi-exclamation-triangle"></i> Danger Zone
-    </div>
-    <div class="card-body">
-        <button class="btn btn-outline-danger" onclick="clearHistory()">
-            <i class="bi bi-trash"></i> Clear History
-        </button>
-        <button class="btn btn-outline-danger ms-2" onclick="resetDatabase()">
-            <i class="bi bi-arrow-counterclockwise"></i> Reset Database
-        </button>
-    </div>
-</div>
+</form>
 {% endblock %}
 
 {% block scripts %}
 <script>
-// Toggle provider settings visibility
 function toggleProviderFields() {
     const provider = document.getElementById('ai_provider').value;
     document.getElementById('openrouter-settings').style.display = provider === 'openrouter' ? 'block' : 'none';
     document.getElementById('gemini-settings').style.display = provider === 'gemini' ? 'block' : 'none';
 }
 
-// Run on page load
 document.addEventListener('DOMContentLoaded', function() {
     toggleProviderFields();
     refreshLogs();
 });
 
-// Convert UTC timestamp to local time
-function convertToLocalTime(line) {
-    // Match timestamp pattern: 2025-12-10 02:34:00,927
-    const match = line.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}),(\d+)/);
-    if (match) {
-        const utcDate = new Date(match[1] + 'T' + match[2] + 'Z');
-        const localTime = utcDate.toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true});
-        return line.replace(match[0], localTime);
-    }
-    return line;
-}
-
-// Fetch and display logs
 function refreshLogs() {
-    fetch('/api/logs')
-        .then(r => r.json())
-        .then(data => {
-            const logEl = document.getElementById('log-output');
-            if (data.logs && data.logs.length > 0) {
-                // Color-code log lines and convert to local time
-                let html = data.logs.map(line => {
-                    line = convertToLocalTime(line);
-                    if (line.includes('ERROR')) {
-                        return `<span class="text-danger">${escapeHtml(line)}</span>`;
-                    } else if (line.includes('WARNING')) {
-                        return `<span class="text-warning">${escapeHtml(line)}</span>`;
-                    } else if (line.includes('INFO')) {
-                        return `<span class="text-info">${escapeHtml(line)}</span>`;
-                    }
-                    return escapeHtml(line);
-                }).join('\n');
-                logEl.innerHTML = html;
-            } else {
-                logEl.textContent = 'No recent logs';
-            }
-            // Scroll to bottom
+    fetch('/api/logs').then(r => r.json()).then(data => {
+        const logEl = document.getElementById('log-output');
+        if (data.logs && data.logs.length > 0) {
+            let html = data.logs.map(line => {
+                if (line.includes('ERROR')) return `<span class="text-danger">${escapeHtml(line)}</span>`;
+                if (line.includes('WARNING')) return `<span class="text-warning">${escapeHtml(line)}</span>`;
+                if (line.includes('VERIFIED') || line.includes('Fixed:')) return `<span class="text-success">${escapeHtml(line)}</span>`;
+                return escapeHtml(line);
+            }).join('\n');
+            logEl.innerHTML = html;
             logEl.parentElement.scrollTop = logEl.parentElement.scrollHeight;
-        })
-        .catch(e => {
-            document.getElementById('log-output').textContent = 'Error loading logs: ' + e;
-        });
+        } else {
+            logEl.textContent = 'No recent logs';
+        }
+    }).catch(e => { document.getElementById('log-output').textContent = 'Error: ' + e; });
 }
 
 function escapeHtml(text) {
@@ -350,61 +407,48 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function clearHistory() {
-    if (!confirm('Are you sure you want to clear all history? This cannot be undone.')) return;
-    fetch('/api/clear_history', {method: 'POST'})
-        .then(r => r.json())
-        .then(data => {
-            alert(data.message || 'History cleared');
-            location.reload();
-        });
-}
-
-function resetDatabase() {
-    if (!confirm('Are you sure you want to reset the entire database? All data will be lost!')) return;
-    if (!confirm('REALLY? This will delete everything!')) return;
-    fetch('/api/reset_database', {method: 'POST'})
-        .then(r => r.json())
-        .then(data => {
-            alert(data.message || 'Database reset');
-            location.reload();
-        });
-}
-
-// Auto-refresh logs every 10 seconds
-setInterval(refreshLogs, 10000);
-
-// Warn when enabling auto-fix
 function warnAutoFix(checkbox) {
-    if (checkbox.checked) {
-        const confirmed = confirm(
-            '⚠️ AUTO-FIX MODE WARNING ⚠️\n\n' +
-            'This will AUTOMATICALLY rename folders in your library without asking for approval.\n\n' +
-            'Make sure you have a backup before enabling this!\n\n' +
-            'Are you sure you want to enable auto-fix?'
-        );
-        if (!confirmed) {
-            checkbox.checked = false;
-        }
+    if (checkbox.checked && !confirm('Auto-Fix will rename folders automatically. Make sure you have backups!\n\nEnable?')) {
+        checkbox.checked = false;
     }
 }
 
-// Generate bug report
+function checkUpdateNow() {
+    const el = document.getElementById('update-status');
+    el.innerHTML = '<span class="text-info small"><i class="bi bi-hourglass-split"></i></span>';
+    fetch('/api/check_update').then(r => r.json()).then(data => {
+        if (data.update_available) {
+            el.innerHTML = `<a href="${data.release_url}" target="_blank" class="btn btn-sm btn-success py-0">${data.latest}</a>`;
+        } else {
+            el.innerHTML = '<span class="text-success small"><i class="bi bi-check"></i></span>';
+        }
+    }).catch(() => { el.innerHTML = '<span class="text-danger small"><i class="bi bi-x"></i></span>'; });
+}
+
+function clearHistory() {
+    if (!confirm('Clear all history? Cannot be undone.')) return;
+    fetch('/api/clear_history', {method: 'POST'}).then(() => location.reload());
+}
+
+function resetDatabase() {
+    if (!confirm('Reset ENTIRE database? All data will be lost!')) return;
+    if (!confirm('REALLY sure?')) return;
+    fetch('/api/reset_database', {method: 'POST'}).then(() => location.reload());
+}
+
 function generateBugReport() {
-    fetch('/api/bug_report')
-        .then(r => r.json())
-        .then(data => {
-            document.getElementById('bug-report-output').classList.remove('d-none');
-            document.getElementById('bug-report-text').value = data.report;
-        })
-        .catch(e => alert('Error generating report: ' + e));
+    fetch('/api/bug_report').then(r => r.json()).then(data => {
+        document.getElementById('bug-report-output').classList.remove('d-none');
+        document.getElementById('bug-report-text').value = data.report;
+    });
 }
 
 function copyBugReport() {
-    const textarea = document.getElementById('bug-report-text');
-    textarea.select();
+    document.getElementById('bug-report-text').select();
     document.execCommand('copy');
-    alert('Bug report copied to clipboard!');
+    alert('Copied!');
 }
+
+setInterval(refreshLogs, 10000);
 </script>
 {% endblock %}

@@ -14,34 +14,40 @@
         </div>
     </div>
     <div class="col-md-3">
-        <div class="card stat-card h-100" title="Books waiting to be analyzed by AI">
-            <div class="card-body text-center">
-                <i class="bi bi-list-task text-warning" style="font-size: 2rem;"></i>
-                <div class="stat-number" id="queue-count">{{ queue_size }}</div>
-                <div class="text-muted">In Queue</div>
-                <small class="text-muted" style="font-size: 0.7rem;">awaiting AI analysis</small>
+        <a href="/queue" class="text-decoration-none">
+            <div class="card stat-card h-100" title="Books waiting to be analyzed by AI" style="cursor: pointer;">
+                <div class="card-body text-center">
+                    <i class="bi bi-list-task text-warning" style="font-size: 2rem;"></i>
+                    <div class="stat-number" id="queue-count">{{ queue_size }}</div>
+                    <div class="text-muted">In Queue</div>
+                    <small class="text-muted" style="font-size: 0.7rem;">awaiting AI analysis</small>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-md-3">
-        <div class="card stat-card h-100" title="Books that have been renamed/corrected">
-            <div class="card-body text-center">
-                <i class="bi bi-check-circle text-success" style="font-size: 2rem;"></i>
-                <div class="stat-number" id="fixed-count">{{ fixed_count }}</div>
-                <div class="text-muted">Fixed</div>
-                <small class="text-muted" style="font-size: 0.7rem;">renamed successfully</small>
+        <a href="/history" class="text-decoration-none">
+            <div class="card stat-card h-100" title="Books that have been renamed/corrected" style="cursor: pointer;">
+                <div class="card-body text-center">
+                    <i class="bi bi-check-circle text-success" style="font-size: 2rem;"></i>
+                    <div class="stat-number" id="fixed-count">{{ fixed_count }}</div>
+                    <div class="text-muted">Fixed</div>
+                    <small class="text-muted" style="font-size: 0.7rem;">renamed successfully</small>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-md-3">
-        <div class="card stat-card h-100" title="AI suggested fixes waiting to be applied to files">
-            <div class="card-body text-center">
-                <i class="bi bi-hourglass-split text-danger" style="font-size: 2rem;"></i>
-                <div class="stat-number" id="pending-fixes">{{ pending_fixes }}</div>
-                <div class="text-muted">Pending Fixes</div>
-                <small class="text-muted" style="font-size: 0.7rem;">ready to apply</small>
+        <a href="/history?status=pending" class="text-decoration-none">
+            <div class="card stat-card h-100" title="AI suggested fixes waiting to be applied to files" style="cursor: pointer;">
+                <div class="card-body text-center">
+                    <i class="bi bi-hourglass-split text-danger" style="font-size: 2rem;"></i>
+                    <div class="stat-number" id="pending-fixes">{{ pending_fixes }}</div>
+                    <div class="text-muted">Pending Fixes</div>
+                    <small class="text-muted" style="font-size: 0.7rem;">ready to apply</small>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
 </div>
 
@@ -55,6 +61,9 @@
                 <div class="d-grid gap-2">
                     <button class="btn btn-primary" onclick="triggerScan()" id="scan-btn">
                         <i class="bi bi-search"></i> Scan Library
+                    </button>
+                    <button class="btn btn-info" onclick="deepRescan()" id="deep-scan-btn">
+                        <i class="bi bi-arrow-repeat"></i> Deep Re-scan (Verify All)
                     </button>
                     <button class="btn btn-success" onclick="processQueue()" id="process-btn">
                         <i class="bi bi-play-fill"></i> Process Queue (1 batch)
@@ -130,6 +139,7 @@
                             <th></th>
                             <th>Fixed To</th>
                             <th>Status</th>
+                            <th>Action</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -146,10 +156,21 @@
                                 <span class="text-info">{{ h.new_title }}</span>
                             </td>
                             <td>
-                                {% if h.old_path != h.new_path %}
+                                {% if h.status == 'undone' %}
+                                <span class="badge bg-info">Undone</span>
+                                {% elif h.old_path != h.new_path %}
                                 <span class="badge bg-danger">Fixed</span>
                                 {% else %}
                                 <span class="badge bg-warning text-dark">OK</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if h.status == 'fixed' and h.old_path != h.new_path %}
+                                <button class="btn btn-sm btn-outline-warning py-0 px-1" onclick="undoFix({{ h.id }})" title="Undo">
+                                    <i class="bi bi-arrow-counterclockwise"></i>
+                                </button>
+                                {% else %}
+                                -
                                 {% endif %}
                             </td>
                         </tr>
@@ -227,6 +248,28 @@ function triggerScan() {
         });
 }
 
+function deepRescan() {
+    if (!confirm('Deep Re-scan will queue ALL books for fresh metadata verification using the new API chain. This may take a while. Continue?')) return;
+
+    const btn = document.getElementById('deep-scan-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Resetting...';
+
+    fetch('/api/deep_rescan', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Deep Re-scan (Verify All)';
+            alert(data.message);
+            location.reload();
+        })
+        .catch(e => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Deep Re-scan (Verify All)';
+            alert('Error: ' + e);
+        });
+}
+
 function processQueue() {
     const btn = document.getElementById('process-btn');
     btn.disabled = true;
@@ -282,6 +325,22 @@ function applyAllPending() {
         });
 }
 
+function undoFix(historyId) {
+    if (!confirm('Undo this fix? The folder will be renamed back to its original name.')) return;
+
+    fetch(`/api/undo/${historyId}`, {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                alert(data.message);
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(e => alert('Error: ' + e));
+}
+
 // Auto-refresh stats and recent activity
 function refreshDashboard() {
     fetch('/api/stats')
@@ -312,9 +371,16 @@ function refreshDashboard() {
                             <span class="text-info">${escapeHtml(h.new_title)}</span>
                         </td>
                         <td>
-                            ${h.old_path !== h.new_path ?
-                                '<span class="badge bg-danger">Fixed</span>' :
-                                '<span class="badge bg-warning text-dark">OK</span>'}
+                            ${h.status === 'undone' ?
+                                '<span class="badge bg-info">Undone</span>' :
+                                h.old_path !== h.new_path ?
+                                    '<span class="badge bg-danger">Fixed</span>' :
+                                    '<span class="badge bg-warning text-dark">OK</span>'}
+                        </td>
+                        <td>
+                            ${h.status === 'fixed' && h.old_path !== h.new_path ?
+                                `<button class="btn btn-sm btn-outline-warning py-0 px-1" onclick="undoFix(${h.id})" title="Undo"><i class="bi bi-arrow-counterclockwise"></i></button>` :
+                                '-'}
                         </td>
                     </tr>
                 `).join('');
