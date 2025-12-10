@@ -78,6 +78,10 @@
                         <button class="btn btn-sm btn-danger" onclick="rejectFix({{ h.id }})" title="Reject - wrong fix">
                             <i class="bi bi-x"></i>
                         </button>
+                        {% elif h.status == 'error' %}
+                        <button class="btn btn-sm btn-outline-danger" onclick="dismissError({{ h.id }})" title="Dismiss - remove this entry">
+                            <i class="bi bi-trash"></i>
+                        </button>
                         {% elif h.status == 'fixed' and h.old_path != h.new_path %}
                         <button class="btn btn-sm btn-outline-warning" onclick="undoFix({{ h.id }})" title="Undo - revert to original">
                             <i class="bi bi-arrow-counterclockwise"></i>
@@ -176,6 +180,21 @@ function rejectFix(historyId) {
         .then(data => {
             if (data.success) {
                 alert('Fix rejected - book marked as OK');
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(e => alert('Error: ' + e));
+}
+
+function dismissError(historyId) {
+    if (!confirm('Dismiss this error entry? It will be removed from history.')) return;
+
+    fetch(`/api/dismiss_error/${historyId}`, {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
                 location.reload();
             } else {
                 alert('Error: ' + (data.error || 'Unknown error'));

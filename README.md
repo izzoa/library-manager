@@ -48,6 +48,13 @@ Your Library (After):
 └── Brandon Sanderson/The Final Empire/        # ✓ Found the real book!
 ```
 
+With **Series Grouping** enabled (Audiobookshelf-compatible):
+```
+├── James S.A. Corey/The Expanse/1 - Leviathan Wakes/
+├── James S.A. Corey/The Expanse/2 - Caliban's War/
+└── Brandon Sanderson/Mistborn/1 - The Final Empire {Kramer}/
+```
+
 ---
 
 ## How It Works
@@ -85,13 +92,28 @@ When metadata is found, the system verifies it makes sense:
 | **Drastic change** (e.g., "Golden" → "Sussman") | **Requires manual approval** to prevent mistakes |
 | **Author/Title swap** (e.g., "Title/Author") | Detected and fixed automatically |
 | **Uncertain match** | Held for review, never auto-applied |
+| **Garbage match** (e.g., "Chapter 19" → "College Accounting") | **Automatically rejected** - won't even suggest it |
+
+### Garbage Match Filtering
+
+APIs sometimes return completely unrelated books. Library Manager uses **Jaccard similarity** to detect and reject these:
+
+```
+✗ "Chapter 19" → "College Accounting, Chapters 1-9"  (only "chapter" matches)
+✗ "Death Genesis" → "The Darkborn AfterLife Genesis" (only "genesis" matches)
+✗ "Mr. Murder" → "Frankenstein"                       (no word overlap at all)
+```
+
+Matches with less than 30% word overlap are automatically rejected.
 
 ### Safety First
 
 - **Drastic author changes ALWAYS require approval** - even in auto-fix mode
+- **Garbage matches filtered** - Won't suggest completely unrelated books
 - **Undo any fix** - Every rename can be reverted with one click
 - **History tracking** - See every change that was made
 - **Reject bad suggestions** - Delete wrong AI guesses without applying them
+- **Dismiss errors** - Clear stale error entries when source files no longer exist
 
 ---
 
@@ -115,6 +137,7 @@ Beautiful dark-themed UI showing:
 - Complete log of all changes
 - Before/After comparison
 - **Undo button** - Revert any fix instantly
+- **Dismiss errors** - Remove stale entries when files don't exist
 - Status badges (Applied, Pending, Undone, Error)
 
 ### Pending Approvals
@@ -138,6 +161,25 @@ Keeps different audiobook versions separate:
 - **Won't merge different versions** - Protects your narrator-specific copies
 - Distinguishes narrators from junk: `(Horror)` = genre (stripped), `(Kafer)` = narrator (kept)
 
+### Series Grouping (Audiobookshelf-Compatible)
+
+Enable series grouping to organize books in a format compatible with Audiobookshelf:
+
+| Setting | Structure | Example |
+|---------|-----------|---------|
+| **Off** | `Author/Title` | `Brandon Sanderson/The Final Empire/` |
+| **On** | `Author/Series/# - Title` | `Brandon Sanderson/Mistborn/1 - The Final Empire/` |
+| **On + Narrator** | `Author/Series/# - Title {Narrator}` | `Brandon Sanderson/Mistborn/1 - The Final Empire {Kramer}/` |
+
+Series detection works from:
+- **API metadata** - Google Books, Audnexus, etc. provide series info
+- **Title patterns** - Automatically parses titles like:
+  - `The Firefly Series, Book 8: Coup de Grâce` → Series: Firefly, #8
+  - `Mistborn Book 1: The Final Empire` → Series: Mistborn, #1
+  - `The Expanse #3 - Abaddon's Gate` → Series: The Expanse, #3
+
+Standalone books (not part of a series) remain in `Author/Title` format.
+
 ### Customizable Naming Formats
 
 Choose the folder structure that matches your player:
@@ -146,7 +188,6 @@ Choose the folder structure that matches your player:
 |--------|---------|-----------------|
 | `Author/Title` | `Brandon Sanderson/Mistborn/` | Audiobookshelf, Plex, Jellyfin |
 | `Author - Title` | `Brandon Sanderson - Mistborn/` | Booksonic, basic players |
-| `Author/Series/Title` | `Brandon Sanderson/Mistborn/The Final Empire/` | Organized libraries |
 
 ### AI Providers
 
@@ -185,8 +226,9 @@ Open **http://localhost:5060** in your browser.
 1. Go to **Settings**
 2. Add your **library path** (e.g., `/mnt/audiobooks`)
 3. Choose **AI Provider** and add API key
-4. **Save Settings**
-5. Go to **Dashboard** → **Scan Library**
+4. Enable **Series Grouping** if you use Audiobookshelf
+5. **Save Settings**
+6. Go to **Dashboard** → **Scan Library**
 
 That's it! Watch as your messy library gets organized.
 
@@ -198,7 +240,7 @@ That's it! Watch as your messy library gets organized.
 
 | Tab | Contents |
 |-----|----------|
-| **General** | Library paths, naming format, auto-fix toggle, scan interval |
+| **General** | Library paths, naming format, series grouping, auto-fix toggle, scan interval |
 | **AI Setup** | Provider selection, API keys, model choice |
 | **Advanced** | Danger zone (reset database, clear history) |
 | **Tools** | Bug report generator, live logs |
@@ -209,11 +251,12 @@ That's it! Watch as your messy library gets organized.
 |--------|---------|-------------|
 | `library_paths` | `[]` | Folders to scan (one per line) |
 | `naming_format` | `author/title` | How to structure renamed folders |
+| `series_grouping` | `false` | Enable Audiobookshelf-style series folders |
 | `auto_fix` | `false` | Apply fixes automatically vs manual approval |
 | `protect_author_changes` | `true` | Extra verification for drastic changes |
 | `scan_interval_hours` | `6` | Auto-scan frequency |
 | `batch_size` | `3` | Books per API batch |
-| `max_requests_per_hour` | `120` | Rate limiting |
+| `max_requests_per_hour` | `400` | Rate limiting |
 
 ---
 
@@ -238,7 +281,7 @@ Books get flagged for review when they have:
 
 1. **Audnexus** - Audible's audiobook database (best for audiobooks)
 2. **OpenLibrary** - Internet Archive's massive book DB
-3. **Google Books** - Wide coverage, good metadata
+3. **Google Books** - Wide coverage, good metadata + series info
 4. **Hardcover** - Modern and indie titles
 5. **AI Fallback** - When no API finds a match
 
@@ -249,6 +292,10 @@ API finds "Paul Sussman / The Lost Army of Cambyses"
 for your folder "Christopher Golden / The Lost Army"
 
                     ↓
+
+Is title similar? NO (< 30% word overlap) → GARBAGE MATCH REJECTED
+
+                    ↓ (if title is similar)
 
 Is author completely different? YES → DRASTIC CHANGE DETECTED
 
@@ -323,6 +370,7 @@ server {
 | `/api/apply_fix/{id}` | POST | Apply a pending fix |
 | `/api/reject_fix/{id}` | POST | Reject/delete a bad suggestion |
 | `/api/undo/{id}` | POST | Revert an applied fix |
+| `/api/dismiss_error/{id}` | POST | Remove an error entry from history |
 | `/api/apply_all_pending` | POST | Apply all pending fixes at once |
 | `/api/worker/start` | POST | Start background worker |
 | `/api/worker/stop` | POST | Stop background worker |
@@ -343,11 +391,22 @@ server {
 3. Click the **↩ Undo** button
 4. Folder will be renamed back to original
 
+### "Error entry for file that doesn't exist"
+1. Go to **History**
+2. Find the error entry
+3. Click the **🗑 Dismiss** button
+4. Entry will be removed from history
+
 ### "Deep rescan everything"
 1. Go to **Dashboard**
 2. Click **Deep Re-scan (Verify All)**
 3. This queues ALL books for fresh metadata verification
 4. Useful after updating API keys or fixing bugs
+
+### "Series not detected"
+- Make sure **Series Grouping** is enabled in Settings → General → Behavior
+- The title pattern must be recognizable (e.g., "Series Name, Book N: Title")
+- If API doesn't have series info, try a deep rescan
 
 ---
 

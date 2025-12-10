@@ -11,12 +11,12 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.1"
+APP_VERSION = "0.9.0-beta.2"
 GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
 
 # Versioning Guide:
-# 0.9.0-beta.1  = Current (early beta, testing features)
-# 0.9.0-beta.2  = Next beta after bug fixes
+# 0.9.0-beta.1  = Initial beta (basic features)
+# 0.9.0-beta.2  = Current (garbage filtering, series grouping, dismiss errors)
 # 0.9.0-rc.1    = Release candidate (feature complete, final testing)
 # 1.0.0         = First stable release (everything works!)
 
@@ -28,9 +28,172 @@ import sqlite3
 import threading
 import logging
 import requests
+import re
 from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, redirect, url_for
+
+
+# ============== SMART MATCHING UTILITIES ==============
+
+def calculate_title_similarity(title1, title2):
+    """
+    Calculate word overlap similarity between two titles.
+    Returns a score from 0.0 to 1.0
+    """
+    if not title1 or not title2:
+        return 0.0
+
+    # Normalize: lowercase, remove punctuation, split into words
+    def normalize(t):
+        t = t.lower()
+        t = re.sub(r'[^\w\s]', ' ', t)
+        words = set(t.split())
+        # Remove common stop words that don't help matching
+        stop_words = {'the', 'a', 'an', 'of', 'and', 'or', 'in', 'to', 'for', 'by', 'part', 'book', 'volume'}
+        return words - stop_words
+
+    words1 = normalize(title1)
+    words2 = normalize(title2)
+
+    if not words1 or not words2:
+        return 0.0
+
+    # Calculate Jaccard similarity (intersection over union)
+    intersection = words1 & words2
+    union = words1 | words2
+
+    return len(intersection) / len(union) if union else 0.0
+
+
+def extract_series_from_title(title):
+    """
+    Extract series name and number from title patterns like:
+    - "The Firefly Series, Book 8: Coup de Grâce" -> (Firefly, 8, Coup de Grâce)
+    - "The Firefly Series, Book 8꞉ Firefly꞉ Coup de Grâce" -> (Firefly, 8, Firefly: Coup de Grâce)
+    - "Mistborn Book 1: The Final Empire" -> (Mistborn, 1, The Final Empire)
+    - "The Expanse #3 - Abaddon's Gate" -> (The Expanse, 3, Abaddon's Gate)
+    """
+    # Normalize colon-like characters (Windows uses ꞉ instead of : in filenames)
+    normalized = title.replace('꞉', ':').replace('：', ':')  # U+A789 and full-width colon
+
+    # Pattern: "Series Name, Book N: Title" or "Series Name Book N: Title"
+    # Also handles "The X Series, Book N: Title"
+    match = re.search(r'^(?:The\s+)?(.+?)\s*(?:Series)?,?\s*Book\s+(\d+)\s*[:\s-]+(.+)$', normalized, re.IGNORECASE)
+    if match:
+        series = match.group(1).strip()
+        # Clean up series name (remove trailing "Series" if it got in)
+        series = re.sub(r'\s*Series\s*$', '', series, flags=re.IGNORECASE)
+        return series, int(match.group(2)), match.group(3).strip()
+
+    # Pattern: "Series #N - Title" or "Series #N: Title"
+    match = re.search(r'^(.+?)\s*#(\d+)\s*[:\s-]+(.+)$', normalized)
+    if match:
+        return match.group(1).strip(), int(match.group(2)), match.group(3).strip()
+
+    # Pattern: "Series Book N - Title"
+    match = re.search(r'^(.+?)\s+Book\s+(\d+)\s*[:\s-]+(.+)$', normalized, re.IGNORECASE)
+    if match:
+        return match.group(1).strip(), int(match.group(2)), match.group(3).strip()
+
+    return None, None, title
+
+
+def is_garbage_match(original_title, suggested_title, threshold=0.3):
+    """
+    Check if an API suggestion is garbage (very low title similarity).
+    Returns True if the match should be rejected.
+
+    Examples that should be rejected:
+    - "Chapter 19" -> "College Accounting, Chapters 1-9" (only matches "chapter")
+    - "Death Genesis" -> "The Darkborn AfterLife Genesis" (only matches "genesis")
+    - "Mr. Murder" -> "Frankenstein" (no overlap)
+
+    Threshold of 0.3 means at least 30% word overlap required.
+    """
+    similarity = calculate_title_similarity(original_title, suggested_title)
+
+    # If original is very short (1-2 words), be more lenient
+    orig_words = len([w for w in original_title.lower().split() if len(w) > 2])
+    if orig_words <= 2 and similarity >= 0.2:
+        return False
+
+    if similarity < threshold:
+        logger.info(f"Garbage match rejected: '{original_title}' vs '{suggested_title}' (similarity: {similarity:.2f})")
+        return True
+
+    return False
+
+
+def extract_folder_metadata(folder_path):
+    """
+    Extract metadata clues from files in the book folder.
+    Looks for: .nfo files, cover images with text, metadata files
+    Returns dict with any found metadata hints.
+    """
+    hints = {}
+    folder = Path(folder_path)
+
+    if not folder.exists():
+        return hints
+
+    # Look for .nfo files (common in audiobook releases)
+    nfo_files = list(folder.glob('*.nfo')) + list(folder.glob('*.NFO'))
+    for nfo in nfo_files:
+        try:
+            content = nfo.read_text(errors='ignore')
+            # Look for author/title patterns in NFO
+            author_match = re.search(r'(?:author|by|written by)[:\s]+([^\n\r]+)', content, re.IGNORECASE)
+            title_match = re.search(r'(?:title|book)[:\s]+([^\n\r]+)', content, re.IGNORECASE)
+            if author_match:
+                hints['nfo_author'] = author_match.group(1).strip()
+            if title_match:
+                hints['nfo_title'] = title_match.group(1).strip()
+        except Exception:
+            pass
+
+    # Look for metadata.json or info.json
+    for meta_file in ['metadata.json', 'info.json', 'audiobook.json']:
+        meta_path = folder / meta_file
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                if 'author' in meta:
+                    hints['meta_author'] = meta['author']
+                if 'title' in meta:
+                    hints['meta_title'] = meta['title']
+                if 'narrator' in meta:
+                    hints['meta_narrator'] = meta['narrator']
+            except Exception:
+                pass
+
+    # Look for desc.txt or description.txt
+    for desc_file in ['desc.txt', 'description.txt', 'readme.txt']:
+        desc_path = folder / desc_file
+        if desc_path.exists():
+            try:
+                content = desc_path.read_text(errors='ignore')[:2000]  # First 2KB
+                hints['description'] = content
+            except Exception:
+                pass
+
+    # Check audio file metadata using mutagen (if available)
+    audio_files = list(folder.glob('*.m4b')) + list(folder.glob('*.mp3')) + list(folder.glob('*.m4a'))
+    if audio_files:
+        try:
+            from mutagen import File
+            audio = File(audio_files[0], easy=True)
+            if audio:
+                if 'albumartist' in audio:
+                    hints['audio_author'] = audio['albumartist'][0]
+                elif 'artist' in audio:
+                    hints['audio_author'] = audio['artist'][0]
+                if 'album' in audio:
+                    hints['audio_title'] = audio['album'][0]
+        except Exception:
+            pass
+
+    return hints
 
 # Configure logging
 logging.basicConfig(
@@ -298,23 +461,43 @@ def rate_limit_wait(api_name):
         API_RATE_LIMITS[api_name]['last_call'] = time.time()
 
 
-def build_new_path(lib_path, author, title, series=None, narrator=None, config=None):
+def build_new_path(lib_path, author, title, series=None, series_num=None, narrator=None, year=None, config=None):
     """Build a new path based on the naming format configuration.
 
-    If narrator is provided, appends it to the title folder: "Title (Narrator)"
-    This keeps different audiobook versions separate.
+    Audiobookshelf-compatible format (when series_grouping enabled):
+    - Narrator in curly braces: {Ray Porter}
+    - Series number prefix: "1 - Title"
+    - Year in parentheses: (2003)
     """
     naming_format = config.get('naming_format', 'author/title') if config else 'author/title'
+    series_grouping = config.get('series_grouping', False) if config else False
 
-    # Include narrator in title folder if present
-    title_folder = f"{title} ({narrator})" if narrator else title
+    # Build title folder name
+    title_folder = title
+
+    # Add series number prefix if series grouping enabled and we have series info
+    if series_grouping and series and series_num:
+        title_folder = f"{series_num} - {title}"
+
+    # Add year if present
+    if year:
+        title_folder = f"{title_folder} ({year})"
+
+    # Add narrator - curly braces for ABS format, parentheses otherwise
+    if narrator:
+        if series_grouping:
+            # ABS format uses curly braces for narrator
+            title_folder = f"{title_folder} {{{narrator}}}"
+        else:
+            # Legacy format uses parentheses
+            title_folder = f"{title_folder} ({narrator})"
 
     if naming_format == 'author - title':
         # Flat structure: Author - Title (single folder)
         folder_name = f"{author} - {title_folder}"
         return lib_path / folder_name
-    elif naming_format == 'author/series/title' and series:
-        # Three-level: Author/Series/Title
+    elif series_grouping and series:
+        # Series grouping enabled AND book has series: Author/Series/Title
         return lib_path / author / series / title_folder
     else:
         # Default: Author/Title (two-level)
@@ -403,15 +586,38 @@ def search_google_books(title, author=None, api_key=None):
         best = items[0].get('volumeInfo', {})
         authors = best.get('authors', [])
 
+        # Try to extract series from subtitle (e.g., "A Mistborn Novel", "Book 2 of The Expanse")
+        series_name = None
+        series_num = None
+        subtitle = best.get('subtitle', '')
+        if subtitle:
+            # "A Mistborn Novel" -> Mistborn
+            match = re.search(r'^A\s+(.+?)\s+Novel$', subtitle, re.IGNORECASE)
+            if match:
+                series_name = match.group(1)
+            # "Book 2 of The Expanse" -> The Expanse, 2
+            match = re.search(r'Book\s+(\d+)\s+of\s+(.+)', subtitle, re.IGNORECASE)
+            if match:
+                series_num = int(match.group(1))
+                series_name = match.group(2)
+            # "The Expanse Book 2" or "Mistborn #1"
+            match = re.search(r'(.+?)\s+(?:Book|#)\s*(\d+)', subtitle, re.IGNORECASE)
+            if match:
+                series_name = match.group(1)
+                series_num = int(match.group(2))
+
         result = {
             'title': best.get('title', ''),
             'author': authors[0] if authors else '',
             'year': best.get('publishedDate', '')[:4] if best.get('publishedDate') else None,
+            'series': series_name,
+            'series_num': series_num,
             'source': 'googlebooks'
         }
 
         if result['title'] and result['author']:
-            logger.info(f"Google Books found: {result['author']} - {result['title']}")
+            logger.info(f"Google Books found: {result['author']} - {result['title']}" +
+                       (f" (Series: {series_name})" if series_name else ""))
             return result
         return None
     except Exception as e:
@@ -537,8 +743,9 @@ def extract_author_title(messy_name):
     # No separator found - just return the whole thing as title
     return None, messy_name
 
-def lookup_book_metadata(messy_name, config):
-    """Try to look up book metadata from multiple APIs, cycling through until found."""
+def lookup_book_metadata(messy_name, config, folder_path=None):
+    """Try to look up book metadata from multiple APIs, cycling through until found.
+    Now with garbage match filtering and folder metadata extraction."""
     # Try to extract author and title separately for better search
     author_hint, title_part = extract_author_title(messy_name)
     clean_title = clean_search_title(title_part)
@@ -546,33 +753,57 @@ def lookup_book_metadata(messy_name, config):
     if not clean_title or len(clean_title) < 3:
         return None
 
+    # Extract metadata from folder files if path provided
+    folder_hints = {}
+    if folder_path:
+        folder_hints = extract_folder_metadata(folder_path)
+        if folder_hints:
+            logger.debug(f"Found folder metadata hints: {folder_hints}")
+            # Use folder metadata as additional hints
+            if 'audio_author' in folder_hints and not author_hint:
+                author_hint = folder_hints['audio_author']
+            if 'audio_title' in folder_hints:
+                # Prefer audio metadata title if clean_title looks like garbage
+                if len(clean_title) < 5 or clean_title.lower().startswith('chapter'):
+                    clean_title = folder_hints['audio_title']
+
     if author_hint:
         logger.debug(f"Looking up metadata for: '{clean_title}' by '{author_hint}'")
     else:
         logger.debug(f"Looking up metadata for: {clean_title}")
 
+    def validate_result(result, original_title):
+        """Check if API result is a garbage match."""
+        if not result:
+            return None
+        suggested_title = result.get('title', '')
+        if is_garbage_match(original_title, suggested_title):
+            logger.info(f"REJECTED garbage match: '{original_title}' -> '{suggested_title}'")
+            return None
+        return result
+
     # 1. Try Audnexus first (best for audiobooks, pulls from Audible)
-    result = search_audnexus(clean_title, author=author_hint)
+    result = validate_result(search_audnexus(clean_title, author=author_hint), clean_title)
     if result:
         return result
 
     # 2. Try OpenLibrary (free, huge database)
-    result = search_openlibrary(clean_title, author=author_hint)
+    result = validate_result(search_openlibrary(clean_title, author=author_hint), clean_title)
     if result:
         return result
 
     # 3. Try Google Books
     google_key = config.get('google_books_api_key')
-    result = search_google_books(clean_title, author=author_hint, api_key=google_key)
+    result = validate_result(search_google_books(clean_title, author=author_hint, api_key=google_key), clean_title)
     if result:
         return result
 
     # 4. Try Hardcover.app (modern Goodreads alternative)
-    result = search_hardcover(clean_title, author=author_hint)
+    result = validate_result(search_hardcover(clean_title, author=author_hint), clean_title)
     if result:
         return result
 
-    logger.debug(f"No API results for: {clean_title}")
+    logger.debug(f"No valid API results for: {clean_title}")
     return None
 
 
@@ -580,6 +811,7 @@ def gather_all_api_candidates(title, author=None, config=None):
     """
     Search ALL APIs and return ALL results (not just the first match).
     This is used for verification when we need multiple perspectives.
+    Now with garbage match filtering.
     """
     candidates = []
     clean_title = clean_search_title(title)
@@ -600,15 +832,24 @@ def gather_all_api_candidates(title, author=None, config=None):
             # Search with author hint
             result = search_func(clean_title, author)
             if result:
-                result['search_query'] = f"{author} - {clean_title}" if author else clean_title
-                candidates.append(result)
+                # Filter garbage matches
+                suggested_title = result.get('title', '')
+                if is_garbage_match(clean_title, suggested_title):
+                    logger.debug(f"REJECTED garbage from {api_name}: '{clean_title}' -> '{suggested_title}'")
+                else:
+                    result['search_query'] = f"{author} - {clean_title}" if author else clean_title
+                    candidates.append(result)
 
             # Also search without author (might find different results)
             if author:
                 result_no_author = search_func(clean_title, None)
-                if result_no_author and result_no_author.get('author') != (result.get('author') if result else None):
-                    result_no_author['search_query'] = clean_title
-                    candidates.append(result_no_author)
+                if result_no_author:
+                    suggested_title = result_no_author.get('title', '')
+                    if is_garbage_match(clean_title, suggested_title):
+                        logger.debug(f"REJECTED garbage from {api_name}: '{clean_title}' -> '{suggested_title}'")
+                    elif result_no_author.get('author') != (result.get('author') if result else None):
+                        result_no_author['search_query'] = clean_title
+                        candidates.append(result_no_author)
         except Exception as e:
             logger.debug(f"Error searching {api_name}: {e}")
 
@@ -647,17 +888,28 @@ PROPOSED CHANGE:
 
 ALL API SEARCH RESULTS:
 {candidate_list}
+
+CRITICAL RULE - REJECT GARBAGE MATCHES:
+The API sometimes returns COMPLETELY UNRELATED books that share one word. These are ALWAYS WRONG:
+- "Chapter 19" -> "College Accounting, Chapters 1-9" = WRONG (different book!)
+- "Death Genesis" -> "The Darkborn AfterLife Genesis" = WRONG (matching on "genesis" only)
+- "Mr. Murder" -> "Frankenstein" = WRONG (no title overlap at all!)
+- "Mortal Coils" -> "The Life and Letters of Thomas Huxley" = WRONG (completely different book)
+
+If the proposed title shares LESS THAN HALF of its significant words with the original title, it is WRONG.
+
 YOUR TASK:
 Analyze whether the proposed change is CORRECT or WRONG. Consider:
 
-1. AUTHOR MATCHING: Does the original author name match or partially match any candidate?
+1. TITLE MATCHING FIRST - Is this even the same book?
+   - At least 50% of significant words must match
+   - "Mr. Murder" and "Dean Koontz's Frankenstein" = WRONG (0% match!)
+   - "Midnight Texas 3" and "Night Shift" = CORRECT if Night Shift is book 3 of Midnight Texas
+
+2. AUTHOR MATCHING: Does the original author name match or partially match any candidate?
    - "Boyett" matches "Steven Boyett" (same person, use full name)
    - "Boyett" does NOT match "John Dickson Carr" (different person!)
    - "A.C. Crispin" matches "A. C. Crispin" or "Ann C. Crispin" (same person)
-
-2. TITLE MATCHING: Same title can exist by DIFFERENT authors!
-   - "The Hollow Man" by Steven Boyett (sci-fi) vs John Dickson Carr (mystery)
-   - "Yellow" by Aron Beauregard (horror) vs "The King in Yellow" by Chambers (different book!)
 
 3. TRUST THE INPUT: If original has a real author name, KEEP that author unless clearly wrong.
 
@@ -672,9 +924,13 @@ RESPOND WITH JSON ONLY:
   "confidence": "HIGH" or "MEDIUM" or "LOW"
 }}
 
-If original author matches a candidate (like Boyett -> Steven Boyett), decision is CORRECT with the full name.
-If proposed author is completely different person, decision is WRONG.
-If uncertain, decision is UNCERTAIN."""
+DECISION RULES:
+- If titles are completely different books = WRONG (don't just keyword match!)
+- If original author matches a candidate (like Boyett -> Steven Boyett) = CORRECT
+- If proposed author is completely different person AND same title = WRONG
+- If uncertain = UNCERTAIN
+
+When in doubt, say WRONG. It's better to leave a book unfixed than to rename it to the wrong thing."""
 
 
 def verify_drastic_change(original_input, original_author, original_title, proposed_author, proposed_title, config):
@@ -773,10 +1029,14 @@ WHEN TO KEEP THE AUTHOR:
 - Input: "Aron Beauregard/Yellow" -> Keep author "Aron Beauregard" (he wrote "Yellow"!)
 - If it looks like a human name (First Last, or Last name), it's probably correct
 
-API RESULTS WARNING:
-- API may return wrong results because same title exists by different authors
-- If API author is different from input author, IGNORE THE API and keep input author
-- Only use API if input has NO author (just a title)
+API RESULTS WARNING - CRITICAL:
+- API may return COMPLETELY WRONG books that share only one keyword!
+- "Chapter 19" -> "College Accounting" = WRONG (API matched on "chapter" - garbage!)
+- "Death Genesis" -> "The Darkborn AfterLife" = WRONG (API matched on "genesis" - garbage!)
+- "Mr. Murder" -> "Frankenstein" = WRONG (no title match at all!)
+- If API title is COMPLETELY DIFFERENT from input title, IGNORE THE API RESULT
+- Same title can exist by different authors - if API author differs, keep INPUT author
+- Only use API if input has NO author OR the titles closely match
 
 LANGUAGE/CHARACTER RULES:
 - ALWAYS use Latin/English characters for author and title names
@@ -808,18 +1068,29 @@ HOW TO TELL THE DIFFERENCE:
 - NOT narrator = common English words, genres, formats, numbers
 - When in doubt, set narrator to null (don't guess)
 
+SERIES DETECTION:
+- If the book is part of a known series, set "series" to the series name and "series_num" to the book number
+- Examples of series books:
+  - "Mistborn Book 1" -> series: "Mistborn", series_num: 1, title: "The Final Empire"
+  - "Eragon" -> series: "Inheritance Cycle", series_num: 1, title: "Eragon"
+  - "The Eye of the World" -> series: "The Wheel of Time", series_num: 1
+  - "Leviathan Wakes" -> series: "The Expanse", series_num: 1
+- Standalone books (NOT in a series) -> series: null, series_num: null
+  - "The Martian" by Andy Weir = standalone, no series
+  - "Project Hail Mary" by Andy Weir = standalone, no series
+  - "Warbreaker" by Brandon Sanderson = standalone, no series
+- Only set series if you're CERTAIN it's part of a series. When in doubt, leave null.
+
 EXAMPLES:
-- "Clive Barker - 1986 - The Hellbound Heart (Kafer) 64k" -> Author: Clive Barker, Title: The Hellbound Heart, Narrator: Kafer
-- "Clive Barker - 1987 - Weaveworld (Vance) 64k 21.12.40" -> Author: Clive Barker, Title: Weaveworld, Narrator: Vance
-- "Dean Koontz - 2020 - Elsewhere (Horror)" -> Author: Dean Koontz, Title: Elsewhere, Narrator: null (Horror is a genre, NOT a narrator!)
-- "Stephen King - IT (Unabridged)" -> Author: Stephen King, Title: IT, Narrator: null (Unabridged is format, not narrator)
-- "Boyett/The Hollow Man" -> Author: Steven Boyett, Title: The Hollow Man, Narrator: null (no narrator pattern)
-- "Brandon Sanderson - Mistborn #1 - The Final Empire" -> Author: Brandon Sanderson, Title: Mistborn: The Final Empire, Narrator: null
-- "The Martian" (no author) -> Author: Andy Weir, Title: The Martian, Narrator: null
+- "Clive Barker - 1986 - The Hellbound Heart (Kafer) 64k" -> Author: Clive Barker, Title: The Hellbound Heart, Narrator: Kafer, series: null
+- "Brandon Sanderson - Mistborn #1 - The Final Empire" -> Author: Brandon Sanderson, Title: The Final Empire, series: Mistborn, series_num: 1
+- "Christopher Paolini/Eragon" -> Author: Christopher Paolini, Title: Eragon, series: Inheritance Cycle, series_num: 1
+- "The Martian" (no author) -> Author: Andy Weir, Title: The Martian, series: null (standalone book)
+- "James S.A. Corey - Leviathan Wakes" -> Author: James S.A. Corey, Title: Leviathan Wakes, series: The Expanse, series_num: 1
 
 Return JSON array. Each object MUST have "item" matching the ITEM_N label:
 [
-  {{"item": "ITEM_1", "author": "Author Name", "title": "Book Title", "narrator": "Narrator Name or null", "series": null, "series_num": null, "year": null}}
+  {{"item": "ITEM_1", "author": "Author Name", "title": "Book Title", "narrator": "Narrator or null", "series": "Series Name or null", "series_num": 1, "year": null}}
 ]
 
 Return ONLY the JSON array, nothing else."""
@@ -1198,11 +1469,70 @@ def analyze_author(author):
     if re.search(r'\b(19[0-9]{2}|20[0-2][0-9])\b', author):
         issues.append("year_in_author")
 
-    # Looks like a book title (common title words)
-    title_words = ['the', 'of', 'and', 'a', 'in', 'to', 'for', 'book', 'series', 'volume']
+    # Words that are clearly NOT first names (adjectives, articles, title starters)
+    not_first_names = {'last', 'first', 'final', 'dark', 'shadow', 'night', 'blood', 'death',
+                       'city', 'house', 'world', 'kingdom', 'empire', 'war', 'game', 'fire',
+                       'ice', 'storm', 'the', 'a', 'an', 'of', 'and', 'in', 'to', 'for',
+                       'new', 'old', 'black', 'white', 'red', 'blue', 'green', 'golden',
+                       'lost', 'forgotten', 'hidden', 'secret', 'ancient', 'eternal'}
+
+    # Words that are clearly NOT surnames (plural nouns, abstract concepts)
+    not_surnames = {'chances', 'secrets', 'lies', 'dreams', 'tales', 'chronicles', 'stories',
+                    'wishes', 'memories', 'shadows', 'nights', 'days', 'years', 'wars',
+                    'games', 'fires', 'storms', 'kingdoms', 'empires', 'worlds', 'houses',
+                    'cities', 'deaths', 'lives', 'loves', 'hearts', 'souls', 'minds',
+                    'stars', 'moons', 'suns', 'gods', 'demons', 'angels', 'dragons',
+                    'kings', 'queens', 'lords', 'princes', 'witches', 'wizards'}
+
     author_words = author.lower().split()
-    if any(w in author_words for w in title_words):
-        issues.append("title_words_in_author")
+
+    # Check if it structurally looks like a name
+    name_patterns = [
+        r'^[A-Z][a-z]+\s+[A-Z][a-z]+$',           # First Last (exact)
+        r'^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+$',  # First Middle Last
+        r'^[A-Z]\.\s*[A-Z][a-z]+$',               # F. Last
+        r'^[A-Z][a-z]+\s+[A-Z]\.\s*[A-Z][a-z]+$', # First M. Last
+        r'^[A-Z][a-z]+,\s+[A-Z][a-z]+$',          # Last, First
+        r'^[A-Z][a-z]+$',                          # Single name (Plato, Madonna)
+        r'^[A-Z]\.([A-Z]\.)+\s*[A-Z][a-z]+$',     # J.R.R. Tolkien, H.P. Lovecraft
+        r'^[A-Z][a-z]+\s+[A-Z]\.([A-Z]\.)+\s*[A-Z][a-z]+$',  # George R.R. Martin
+        r'^[A-Z][a-z]+\s+[A-Z]\.[A-Z]\.\s*[A-Z][a-z]+$',     # Brandon R.R. Author
+        r'^[A-Z][a-z]+\s+[A-Z]\.\s*(Le|De|Von|Van|La|Du)\s+[A-Z][a-z]+$',  # Ursula K. Le Guin
+        r'^[A-Z][a-z]+\s+(Le|De|Von|Van|La|Du)\s+[A-Z][a-z]+$',  # Anne De Vries
+    ]
+    looks_like_name = any(re.match(p, author) for p in name_patterns)
+
+    # Even if it LOOKS like a name structurally, check if the words are actually name-like
+    if looks_like_name and len(author_words) >= 2:
+        first_word = author_words[0]
+        last_word = author_words[-1]
+
+        # "Last Chances" - first word is adjective, last word is plural noun = NOT a name
+        if first_word in not_first_names and last_word in not_surnames:
+            looks_like_name = False
+            issues.append("title_fragment_not_name")
+        # "Last Something" - first word alone is a red flag if not a real first name
+        elif first_word in not_first_names and last_word in not_surnames:
+            looks_like_name = False
+            issues.append("title_words_in_author")
+        # "Something Chances" - second word is clearly not a surname
+        elif last_word in not_surnames:
+            looks_like_name = False
+            issues.append("not_a_surname")
+
+    # Only flag title words if it DOESN'T look like a valid name
+    if not looks_like_name:
+        title_words = ['the', 'of', 'and', 'a', 'in', 'to', 'for', 'book', 'series', 'volume',
+                       'last', 'first', 'final', 'dark', 'shadow', 'night', 'blood', 'death',
+                       'city', 'house', 'world', 'kingdom', 'empire', 'war', 'game', 'fire',
+                       'ice', 'storm', 'king', 'queen', 'lord', 'lady', 'prince', 'dragon',
+                       'chances', 'secrets', 'lies', 'dreams', 'tales', 'chronicles']
+        if any(w in author_words for w in title_words):
+            issues.append("title_words_in_author")
+
+        # Two+ words but doesn't match name patterns - probably a title
+        if len(author) > 3 and len(author.split()) >= 2:
+            issues.append("not_a_name_pattern")
 
     # LastName, FirstName format
     if re.match(r'^[A-Z][a-z]+,\s+[A-Z][a-z]+', author):
@@ -1551,6 +1881,19 @@ def process_queue(config, limit=None):
         new_author = (result.get('author') or '').strip()
         new_title = (result.get('title') or '').strip()
         new_narrator = (result.get('narrator') or '').strip() or None  # None if empty
+        new_series = (result.get('series') or '').strip() or None  # Series name
+        new_series_num = result.get('series_num')  # Series number (can be int or string like "1" or "Book 1")
+        new_year = result.get('year')  # Publication year
+
+        # If AI didn't detect series, try to extract it from the title pattern
+        # This catches titles like "The Firefly Series, Book 8: Coup de Grâce"
+        if not new_series and new_title:
+            extracted_series, extracted_num, extracted_title = extract_series_from_title(new_title)
+            if extracted_series:
+                new_series = extracted_series
+                new_series_num = extracted_num
+                new_title = extracted_title  # Use the cleaned title without series prefix
+                logger.info(f"Extracted series from title: '{extracted_series}' #{extracted_num} - '{extracted_title}'")
 
         if not new_author or not new_title:
             # Remove from queue, mark as verified
@@ -1564,7 +1907,9 @@ def process_queue(config, limit=None):
         if new_author != row['current_author'] or new_title != row['current_title'] or new_narrator:
             old_path = Path(row['path'])
             lib_path = old_path.parent.parent
-            new_path = build_new_path(lib_path, new_author, new_title, narrator=new_narrator, config=config)
+            new_path = build_new_path(lib_path, new_author, new_title,
+                                      series=new_series, series_num=new_series_num,
+                                      narrator=new_narrator, year=new_year, config=config)
 
             # Check for drastic author change
             drastic_change = is_drastic_author_change(row['current_author'], new_author)
@@ -1619,7 +1964,9 @@ def process_queue(config, limit=None):
                     continue
 
                 # Recalculate new_path with potentially updated author/title/narrator
-                new_path = build_new_path(lib_path, new_author, new_title, narrator=new_narrator, config=config)
+                new_path = build_new_path(lib_path, new_author, new_title,
+                                          series=new_series, series_num=new_series_num,
+                                          narrator=new_narrator, year=new_year, config=config)
 
             # Only auto-fix if enabled AND NOT a drastic change
             # Drastic changes ALWAYS require manual approval to prevent data loss
@@ -2077,6 +2424,7 @@ def settings_page():
         config['auto_fix'] = 'auto_fix' in request.form
         config['protect_author_changes'] = 'protect_author_changes' in request.form
         config['enabled'] = 'enabled' in request.form
+        config['series_grouping'] = 'series_grouping' in request.form
         config['google_books_api_key'] = request.form.get('google_books_api_key', '').strip() or None
         config['update_channel'] = request.form.get('update_channel', 'stable')
         config['naming_format'] = request.form.get('naming_format', 'author/title')
@@ -2201,6 +2549,32 @@ def api_reject_fix(history_id):
     conn.close()
 
     logger.info(f"Rejected fix {history_id}, book {book_id} marked as verified")
+    return jsonify({'success': True})
+
+@app.route('/api/dismiss_error/<int:history_id>', methods=['POST'])
+def api_dismiss_error(history_id):
+    """Dismiss an error entry - just delete it from history."""
+    conn = get_db()
+    c = conn.cursor()
+
+    # Get the history entry
+    c.execute('SELECT book_id, status FROM history WHERE id = ?', (history_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Entry not found'})
+
+    # Delete the history entry
+    c.execute('DELETE FROM history WHERE id = ?', (history_id,))
+
+    # If the book still exists, mark it as verified so it doesn't keep erroring
+    if row['book_id']:
+        c.execute("UPDATE books SET status = 'verified' WHERE id = ?", (row['book_id'],))
+
+    conn.commit()
+    conn.close()
+
+    logger.info(f"Dismissed error entry {history_id}")
     return jsonify({'success': True})
 
 @app.route('/api/apply_all_pending', methods=['POST'])

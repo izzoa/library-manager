@@ -82,27 +82,7 @@
                                     <option value="author - title" {% if config.naming_format == 'author - title' %}selected{% endif %}>
                                         Author - Title (flat) - Booksonic, basic players
                                     </option>
-                                    <option value="author/series/title" {% if config.naming_format == 'author/series/title' %}selected{% endif %}>
-                                        Author/Series/Title - organized but less compatible
-                                    </option>
                                 </select>
-                                <div class="mt-2 small">
-                                    <table class="table table-sm table-dark mb-0" style="font-size: 0.8rem;">
-                                        <thead><tr><th>Before</th><th></th><th>After</th></tr></thead>
-                                        <tbody>
-                                            <tr>
-                                                <td><code>Unknown/Mistborn Book 1</code></td>
-                                                <td><i class="bi bi-arrow-right text-info"></i></td>
-                                                <td><code>Brandon Sanderson/The Final Empire</code></td>
-                                            </tr>
-                                            <tr>
-                                                <td><code>Alien Clay/Adrian Tchaikovsky</code></td>
-                                                <td><i class="bi bi-arrow-right text-info"></i></td>
-                                                <td><code>Adrian Tchaikovsky/Alien Clay</code></td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -129,13 +109,21 @@
                                     <br><small class="text-muted">Rename folders automatically without approval</small>
                                 </label>
                             </div>
-                            <div class="form-check form-switch">
+                            <div class="form-check form-switch mb-2">
                                 <input class="form-check-input" type="checkbox" name="protect_author_changes" id="protect_author_changes"
                                        {% if config.protect_author_changes %}checked{% endif %}>
                                 <label class="form-check-label" for="protect_author_changes">
                                     <strong>Smart Verification</strong>
                                     <span class="badge bg-success">Recommended</span>
                                     <br><small class="text-muted">Extra verification when author changes completely</small>
+                                </label>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="series_grouping" id="series_grouping"
+                                       {% if config.series_grouping %}checked{% endif %}>
+                                <label class="form-check-label" for="series_grouping">
+                                    <strong>Series Grouping</strong>
+                                    <br><small class="text-muted">Group series books: <code>Author/Series/1 - Title</code></small>
                                 </label>
                             </div>
                         </div>
