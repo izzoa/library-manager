@@ -706,12 +706,13 @@ def deep_scan_library(config):
 
     logger.info(f"Found {duplicate_count} potential duplicate file sets")
 
-    # Update daily stats
+    # Update daily stats (INSERT if not exists, then UPDATE to preserve other columns)
     today = datetime.now().strftime('%Y-%m-%d')
-    c.execute('''INSERT OR REPLACE INTO stats (date, scanned, queued)
-                 VALUES (?, COALESCE((SELECT scanned FROM stats WHERE date = ?), 0) + ?,
-                         COALESCE((SELECT queued FROM stats WHERE date = ?), 0) + ?)''',
-              (today, today, scanned, today, queued))
+    c.execute('INSERT OR IGNORE INTO stats (date) VALUES (?)', (today,))
+    c.execute('''UPDATE stats SET
+                 scanned = COALESCE(scanned, 0) + ?,
+                 queued = COALESCE(queued, 0) + ?
+                 WHERE date = ?''', (scanned, queued, today))
     conn.commit()
     conn.close()
 
@@ -793,11 +794,10 @@ def process_queue(config, limit=None):
     results = call_ai(messy_names, config)
     logger.info(f"[DEBUG] AI returned {len(results) if results else 0} results")
 
-    # Update API call stats
+    # Update API call stats (INSERT if not exists, then UPDATE to preserve other columns)
     today = datetime.now().strftime('%Y-%m-%d')
-    c.execute('''INSERT OR REPLACE INTO stats (date, api_calls)
-                 VALUES (?, COALESCE((SELECT api_calls FROM stats WHERE date = ?), 0) + 1)''',
-              (today, today))
+    c.execute('INSERT OR IGNORE INTO stats (date) VALUES (?)', (today,))
+    c.execute('UPDATE stats SET api_calls = COALESCE(api_calls, 0) + 1 WHERE date = ?', (today,))
 
     if not results:
         logger.warning("No results from AI")
@@ -880,9 +880,9 @@ def process_queue(config, limit=None):
         c.execute('DELETE FROM queue WHERE id = ?', (row['queue_id'],))
         processed += 1
 
-    # Update stats
-    c.execute('''UPDATE stats SET fixed = COALESCE(fixed, 0) + ? WHERE date = ?''',
-              (fixed, today))
+    # Update stats (INSERT if not exists first)
+    c.execute('INSERT OR IGNORE INTO stats (date) VALUES (?)', (today,))
+    c.execute('UPDATE stats SET fixed = COALESCE(fixed, 0) + ? WHERE date = ?', (fixed, today))
 
     conn.commit()
     conn.close()
