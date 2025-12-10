@@ -88,9 +88,16 @@ def init_db():
         current_author TEXT,
         current_title TEXT,
         status TEXT DEFAULT 'pending',
+        error_message TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
+
+    # Add error_message column if it doesn't exist (migration)
+    try:
+        c.execute('ALTER TABLE books ADD COLUMN error_message TEXT')
+    except:
+        pass  # Column already exists
 
     # Queue table - books needing AI analysis
     c.execute('''CREATE TABLE IF NOT EXISTS queue (
@@ -112,9 +119,21 @@ def init_db():
         new_title TEXT,
         old_path TEXT,
         new_path TEXT,
+        status TEXT DEFAULT 'pending_fix',
+        error_message TEXT,
         fixed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (book_id) REFERENCES books(id)
     )''')
+
+    # Add status and error_message columns if they don't exist (migration)
+    try:
+        c.execute("ALTER TABLE history ADD COLUMN status TEXT DEFAULT 'pending_fix'")
+    except:
+        pass
+    try:
+        c.execute('ALTER TABLE history ADD COLUMN error_message TEXT')
+    except:
+        pass
 
     # Stats table - daily stats
     c.execute('''CREATE TABLE IF NOT EXISTS stats (
@@ -803,8 +822,8 @@ def process_queue(config, limit=None):
                     logger.info(f"Fixed: {row['current_author']}/{row['current_title']} -> {new_author}/{new_title}")
 
                     # Record in history
-                    c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path)
-                                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                    c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, 'fixed')''',
                              (row['book_id'], row['current_author'], row['current_title'],
                               new_author, new_title, str(old_path), str(new_path)))
 
@@ -815,8 +834,10 @@ def process_queue(config, limit=None):
 
                     fixed += 1
                 except Exception as e:
-                    logger.error(f"Error fixing {row['path']}: {e}")
-                    c.execute('UPDATE books SET status = ? WHERE id = ?', ('error', row['book_id']))
+                    error_msg = str(e)
+                    logger.error(f"Error fixing {row['path']}: {error_msg}")
+                    c.execute('UPDATE books SET status = ?, error_message = ? WHERE id = ?',
+                             ('error', error_msg, row['book_id']))
             else:
                 # Just record the suggested fix
                 c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path)
@@ -860,8 +881,12 @@ def apply_fix(history_id):
     new_path = Path(fix['new_path'])
 
     if not old_path.exists():
+        error_msg = f"Source folder no longer exists: {old_path}"
+        c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
+                 ('error', error_msg, history_id))
+        conn.commit()
         conn.close()
-        return False, "Source folder no longer exists"
+        return False, error_msg
 
     try:
         if new_path.exists():
@@ -884,12 +909,19 @@ def apply_fix(history_id):
                      WHERE id = ?''',
                  (str(new_path), fix['new_author'], fix['new_title'], 'fixed', fix['book_id']))
 
+        # Update history status
+        c.execute('UPDATE history SET status = ? WHERE id = ?', ('fixed', history_id))
+
         conn.commit()
         conn.close()
         return True, "Fix applied successfully"
     except Exception as e:
+        error_msg = str(e)
+        c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
+                 ('error', error_msg, history_id))
+        conn.commit()
         conn.close()
-        return False, str(e)
+        return False, error_msg
 
 # ============== BACKGROUND WORKER ==============
 

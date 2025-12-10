@@ -39,6 +39,13 @@
                         <span class="badge bg-success">Applied</span>
                         {% elif h.status == 'pending_fix' %}
                         <span class="badge bg-warning text-dark">Pending</span>
+                        {% elif h.status == 'error' %}
+                        <span class="badge bg-danger" title="{{ h.error_message or 'Unknown error' }}" style="cursor: help;">
+                            Error <i class="bi bi-info-circle"></i>
+                        </span>
+                        {% if h.error_message %}
+                        <br><small class="text-danger">{{ h.error_message[:50] }}{% if h.error_message|length > 50 %}...{% endif %}</small>
+                        {% endif %}
                         {% else %}
                         <span class="badge bg-secondary">{{ h.status }}</span>
                         {% endif %}
