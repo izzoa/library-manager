@@ -11,7 +11,7 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.8"
+APP_VERSION = "0.9.0-beta.9"
 GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
 
 # Versioning Guide:
@@ -240,9 +240,13 @@ app.secret_key = 'library-manager-secret-key-2024'
 # ============== CONFIGURATION ==============
 
 BASE_DIR = Path(__file__).parent
-DB_PATH = BASE_DIR / 'library.db'
-CONFIG_PATH = BASE_DIR / 'config.json'
-SECRETS_PATH = BASE_DIR / 'secrets.json'
+# Support DATA_DIR env var for Docker persistence, default to app directory
+DATA_DIR = Path(os.environ.get('DATA_DIR', BASE_DIR))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+DB_PATH = DATA_DIR / 'library.db'
+CONFIG_PATH = DATA_DIR / 'config.json'
+SECRETS_PATH = DATA_DIR / 'secrets.json'
 
 DEFAULT_CONFIG = {
     "library_paths": [],  # Empty by default - user configures via Settings

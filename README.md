@@ -238,6 +238,45 @@ That's it! Watch as your messy library gets organized.
 
 ---
 
+## Docker Installation
+
+### Docker Compose (Recommended for UnRaid/Dockge/Portainer)
+
+```yaml
+version: "3.8"
+
+services:
+  library-manager:
+    build: .
+    container_name: library-manager
+    restart: unless-stopped
+    ports:
+      - "5060:5060"
+    volumes:
+      # Your audiobook library - CHANGE THIS
+      - /mnt/user/media/audiobooks:/audiobooks
+      # Data persistence
+      - ./data:/data
+    environment:
+      - TZ=America/Chicago
+```
+
+**Setup:**
+1. Clone the repo: `git clone https://github.com/deucebucket/library-manager.git`
+2. Edit `docker-compose.yml` - change `/mnt/user/media/audiobooks` to your audiobook path
+3. Run: `docker-compose up -d`
+4. Open **http://your-server:5060**
+5. In Settings, set library path to: `/audiobooks` (the path inside the container)
+6. Add your API key and start scanning!
+
+### Pre-built Image (Coming Soon)
+
+```bash
+docker pull ghcr.io/deucebucket/library-manager:latest
+```
+
+---
+
 ## Configuration
 
 ### Settings Tabs
@@ -421,7 +460,7 @@ Ideas for future development:
 - [ ] Cover art fetching
 - [ ] Metadata embedding in files
 - [ ] Multi-user support
-- [ ] Docker container
+- [x] Docker container
 
 Pull requests welcome!
 

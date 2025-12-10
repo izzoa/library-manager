@@ -2,6 +2,19 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.9] - 2025-12-10
+
+### Added
+- **Docker support** - Full Docker and Docker Compose setup
+  - `Dockerfile` for building the container
+  - `docker-compose.yml` with UnRaid/Dockge/Portainer instructions
+  - `DATA_DIR` environment variable for persistent config/database storage
+  - Health check endpoint for container monitoring
+  - Updated README with Docker installation instructions
+
+### Changed
+- Config, secrets, and database now support external data directory via `DATA_DIR` env var
+
 ## [0.9.0-beta.8] - 2025-12-10
 
 ### Fixed

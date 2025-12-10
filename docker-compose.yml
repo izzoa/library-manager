@@ -1,0 +1,49 @@
+version: "3.8"
+
+services:
+  library-manager:
+    build: .
+    container_name: library-manager
+    restart: unless-stopped
+    ports:
+      - "5060:5060"
+    volumes:
+      # Your audiobook library - CHANGE THIS to your path
+      - /path/to/your/audiobooks:/audiobooks
+
+      # Data persistence (config.json, secrets.json, library.db)
+      - ./data:/data
+
+    environment:
+      - TZ=America/Chicago  # Change to your timezone
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5060/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# =============================================================
+# QUICK START FOR DOCKGE / PORTAINER / UNRAID USERS:
+# =============================================================
+#
+# 1. Copy this file to your stacks directory
+#
+# 2. Edit the volumes section:
+#    - Change /path/to/your/audiobooks to your actual audiobook folder
+#    - Example for UnRaid: /mnt/user/media/audiobooks:/audiobooks
+#
+# 3. Change timezone (TZ) to your location
+#    - Example: America/New_York, Europe/London, etc.
+#
+# 4. Deploy the stack
+#
+# 5. Access the web UI at: http://your-server-ip:5060
+#
+# 6. In Settings, set your library path to: /audiobooks
+#    (This is the path INSIDE the container)
+#
+# 7. Add your API key (Gemini recommended - free 14,400 calls/day)
+#    Get one at: https://aistudio.google.com
+#
+# =============================================================
