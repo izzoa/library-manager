@@ -462,6 +462,8 @@ Ideas for future development:
 - [ ] Audiobookshelf API integration
 - [ ] Cover art fetching
 - [ ] Metadata embedding in files
+- [ ] Movie library organization
+- [ ] Music library organization
 - [x] Docker container
 
 Pull requests welcome!
