@@ -3409,4 +3409,5 @@ if __name__ == '__main__':
     init_config()  # Create config files if they don't exist
     init_db()
     start_worker()
-    app.run(host='0.0.0.0', port=5080, debug=False)
+    port = int(os.environ.get('PORT', 5757))
+    app.run(host='0.0.0.0', port=port, debug=False)

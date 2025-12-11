@@ -14,7 +14,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open **http://localhost:5080** in your browser.
+Open **http://localhost:5757** in your browser.
 
 ## Docker
 
@@ -38,7 +38,7 @@ docker-compose up -d
 
 ## First Run
 
-1. Open http://localhost:5080
+1. Open http://localhost:5757
 2. Go to **Settings**
 3. Add your **library path** (e.g., `/mnt/audiobooks`)
 4. Add your **API key**

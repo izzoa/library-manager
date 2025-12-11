@@ -68,7 +68,7 @@ services:
     container_name: library-manager
     restart: unless-stopped
     ports:
-      - "5080:5080"
+      - "5757:5757"
     volumes:
       # ⚠️ CHANGE THIS to your audiobook path
       - /path/to/audiobooks:/audiobooks
@@ -76,7 +76,7 @@ services:
     environment:
       - TZ=America/Chicago
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5080/"]
+      test: ["CMD", "curl", "-f", "http://localhost:5757/"]
       interval: 30s
       timeout: 10s
       retries: 3

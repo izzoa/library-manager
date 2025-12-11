@@ -47,7 +47,7 @@ docker-compose up -d
 
 ### 4. Access the Web UI
 
-Open **http://your-server-ip:5080** in your browser.
+Open **http://your-server-ip:5757** in your browser.
 
 ### 5. Configure Settings
 
@@ -221,7 +221,7 @@ services:
     container_name: library-manager
     restart: unless-stopped
     ports:
-      - "5080:5080"
+      - "5757:5757"
     volumes:
       # CHANGE THIS to your audiobook path
       - /mnt/user/media/audiobooks:/audiobooks
@@ -231,7 +231,7 @@ services:
 ```
 
 4. Click **Deploy**
-5. Access at http://your-server:5080
+5. Access at http://your-server:5757
 
 ---
 
@@ -310,7 +310,7 @@ docker logs library-manager
 ```
 
 **Common issues:**
-- Port 5080 already in use → Change to `5061:5080`
+- Port 5757 already in use → Change to `5061:5757`
 - Volume path doesn't exist → Create the directory first
 - Syntax error in compose file → Validate YAML
 
@@ -318,8 +318,8 @@ docker logs library-manager
 
 1. Check container is running: `docker ps`
 2. Check port mapping: `docker port library-manager`
-3. Try `http://localhost:5080` if on same machine
-4. Check firewall allows port 5080
+3. Try `http://localhost:5757` if on same machine
+4. Check firewall allows port 5757
 
 ### Changes Not Persisting
 

@@ -223,7 +223,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open **http://localhost:5080** in your browser.
+Open **http://localhost:5757** in your browser.
 
 ### 3. Configure (via Web UI)
 
@@ -253,7 +253,7 @@ cd library-manager
 docker-compose up -d
 ```
 
-Open **http://your-server:5080** and set library path to `/audiobooks` in Settings.
+Open **http://your-server:5757** and set library path to `/audiobooks` in Settings.
 
 ### Important: Volume Mounts
 
@@ -392,7 +392,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/library.yourdomain.com/privkey.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:5080;
+        proxy_pass http://127.0.0.1:5757;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
