@@ -33,3 +33,8 @@ ENV/
 Thumbs.db
 *.db-shm
 *.db-wal
+
+# Metadata scraper
+metadata_scraper/venv/
+metadata_scraper/*.db
+metadata_scraper/*.log
