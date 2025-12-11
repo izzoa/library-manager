@@ -38,3 +38,4 @@ Thumbs.db
 metadata_scraper/venv/
 metadata_scraper/*.db
 metadata_scraper/*.log
+metadata_scraper/
