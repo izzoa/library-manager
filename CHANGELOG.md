@@ -2,6 +2,44 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.14] - 2025-12-12
+
+### Added
+- **Universal search** - Search now covers everything
+  - Searches across titles, authors, series names, AND years
+  - Type "jordan" to find Robert Jordan's books
+  - Type "2023" to find books published in 2023
+  - Type "wheel of time" to find the series
+- **Metadata completeness scoring** - See how complete your book data is
+  - 0-100% score based on weighted fields (author 25%, description 25%, cover 20%, year 15%, ISBN 15%)
+  - Color-coded badges in search results (red/yellow/blue/green)
+  - Hover to see which fields are missing
+- **Dynamic database stats** - Live counts instead of hardcoded numbers
+  - Shows actual book/author/series counts from database
+  - Updates automatically as data grows
+- **Improved filename cleaning** - Better handling of YouTube rips and messy filenames
+  - Removes "Audiobook", "Full Audiobook", "Complete", "Unabridged" etc.
+  - Strips years, quality markers, and other junk
+  - Makes searching from filenames more accurate
+- **Reddit reply templates** - Pre-written responses for common questions
+  - Access at `/static/reddit-replies.html`
+  - One-click copy to clipboard
+  - Covers safety concerns, naming patterns, YouTube rips
+
+### Fixed
+- **OpenLibrary scraper** - Editions-only mode now properly links authors
+  - Previously 18M books imported without author data
+  - Scraper now builds author cache even in editions-only mode
+  - Backfill script created to fix existing orphaned books
+- **Search ranking** - Results now prioritize exact matches
+
+### Backend (metadata_scraper)
+- Added `/api/bookdb_stats` endpoint for live database counts
+- Added `completeness` and `missing_fields` to Book model
+- Added `calculate_completeness()` function with weighted scoring
+- Created `backfill_authors.py` script to fix 18M orphaned books
+- Fixed `build_author_name_cache()` for editions-only imports
+
 ## [0.9.0-beta.13] - 2025-12-11
 
 ### Added

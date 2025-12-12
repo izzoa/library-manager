@@ -132,7 +132,7 @@
                             <i class="bi bi-search"></i> Search
                         </button>
                     </div>
-                    <small class="text-muted">Search our 49M+ book database to find the correct match</small>
+                    <small class="text-muted">Search across <span id="db-stats-text">our book database</span> to find the correct match</small>
                 </div>
 
                 <!-- Search Results -->
@@ -152,6 +152,89 @@
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="saveManualMatch()">
                     <i class="bi bi-check-lg"></i> Save as Pending Fix
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Book Hover Card -->
+<div id="book-hover-card" class="book-hover-card">
+    <div class="card-header">
+        <div class="d-flex align-items-start gap-3">
+            <div id="hover-cover-container">
+                <div class="book-cover-placeholder"><i class="bi bi-book"></i></div>
+            </div>
+            <div class="flex-grow-1">
+                <div class="book-title" id="hover-title">Loading...</div>
+                <div class="book-author" id="hover-author"></div>
+                <div class="book-series" id="hover-series"></div>
+            </div>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="book-meta mb-2" id="hover-meta"></div>
+        <div class="book-description" id="hover-description"></div>
+        <div class="book-tags mt-2" id="hover-tags"></div>
+        <div class="abs-status" id="hover-abs-status" style="display: none;">
+            <small class="text-muted"><i class="bi bi-headphones"></i> AudiobookShelf Status</small>
+            <div id="hover-abs-users"></div>
+        </div>
+    </div>
+    <div class="click-hint">
+        <i class="bi bi-mouse"></i> Click to select this book
+    </div>
+</div>
+
+<!-- Book Detail Modal -->
+<div class="modal fade" id="bookDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark">
+            <div class="modal-header" style="border-color: #0f3460;">
+                <h5 class="modal-title"><i class="bi bi-book"></i> Book Details</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-3 text-center">
+                        <div id="detail-cover-container" class="mb-3">
+                            <div class="book-cover-placeholder" style="width: 150px; height: 220px; margin: auto;">
+                                <i class="bi bi-book" style="font-size: 3rem;"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-9">
+                        <h4 id="detail-title" class="mb-1">Book Title</h4>
+                        <p id="detail-author" class="text-info mb-2"></p>
+                        <p id="detail-series" class="text-warning mb-2" style="display: none;"></p>
+                        <div class="row mb-3">
+                            <div class="col-auto" id="detail-year-container" style="display: none;">
+                                <small class="text-muted">Year: </small><span id="detail-year"></span>
+                            </div>
+                            <div class="col-auto" id="detail-pages-container" style="display: none;">
+                                <small class="text-muted">Pages: </small><span id="detail-pages"></span>
+                            </div>
+                            <div class="col-auto" id="detail-language-container" style="display: none;">
+                                <small class="text-muted">Language: </small><span id="detail-language"></span>
+                            </div>
+                        </div>
+                        <div id="detail-isbns" class="mb-3" style="display: none;">
+                            <small class="text-muted">ISBN: </small><code id="detail-isbn"></code>
+                        </div>
+                        <div id="detail-subjects" class="mb-3"></div>
+                    </div>
+                </div>
+                <hr style="border-color: #0f3460;">
+                <div id="detail-description" class="mb-3" style="max-height: 200px; overflow-y: auto;"></div>
+                <div id="detail-abs-section" class="alert alert-info" style="display: none;">
+                    <h6><i class="bi bi-headphones"></i> AudiobookShelf Status</h6>
+                    <div id="detail-abs-users"></div>
+                </div>
+            </div>
+            <div class="modal-footer" style="border-color: #0f3460;">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" onclick="useBookFromDetail()">
+                    <i class="bi bi-check-lg"></i> Use This Book
                 </button>
             </div>
         </div>
@@ -327,6 +410,24 @@ function removeFromQueue(queueId) {
 setInterval(refreshQueue, 10000);
 log('Queue page loaded. Auto-refresh every 10s.');
 
+// Fetch and display BookBucket database stats
+function formatNumber(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(0) + 'K';
+    return n.toString();
+}
+
+fetch('/api/bookdb_stats')
+    .then(r => r.json())
+    .then(data => {
+        if (data.books && data.authors && data.series) {
+            const statsText = `${formatNumber(data.books)}+ books, ${formatNumber(data.series)}+ series, ${formatNumber(data.authors)}+ authors`;
+            const el = document.getElementById('db-stats-text');
+            if (el) el.textContent = statsText;
+        }
+    })
+    .catch(e => console.log('Stats fetch error:', e));
+
 // ===== EDIT FUNCTIONS =====
 let selectedBookDBResult = null;
 let editModal = null;
@@ -375,17 +476,62 @@ function searchBookDB() {
             resultsList.innerHTML = data.results.map((book, idx) => {
                 const author = book.author_name || 'Unknown Author';
                 const title = book.title || 'Unknown Title';
-                const series = book.series_name ? ` (${book.series_name}${book.series_position ? ' #' + book.series_position : ''})` : '';
-                const year = book.year_published ? ` [${book.year_published}]` : '';
+                const series = book.series_name ? `${book.series_name}${book.series_position ? ' #' + book.series_position : ''}` : '';
+                const year = book.year_published ? book.year_published : '';
+                const isbn = book.isbn || '';
+                const bookId = book.id || 0;
+                const coverUrl = book.cover_url;
+                const completeness = book.completeness || 0;
+                const missingFields = book.missing_fields || [];
+
+                // Completeness badge color based on score
+                let completenessColor = 'danger';
+                let completenessIcon = 'exclamation-triangle';
+                if (completeness >= 80) {
+                    completenessColor = 'success';
+                    completenessIcon = 'check-circle';
+                } else if (completeness >= 60) {
+                    completenessColor = 'info';
+                    completenessIcon = 'info-circle';
+                } else if (completeness >= 40) {
+                    completenessColor = 'warning';
+                    completenessIcon = 'exclamation-circle';
+                }
+
+                // Create missing fields tooltip
+                const missingTooltip = missingFields.length > 0
+                    ? `Missing: ${missingFields.join(', ')}`
+                    : 'Complete metadata';
+
+                // Create cover thumbnail HTML
+                const coverHtml = coverUrl
+                    ? `<img src="${coverUrl}" alt="" class="search-result-cover" onerror="this.parentElement.innerHTML='<div class=\\'search-cover-placeholder\\'><i class=\\'bi bi-book\\'></i></div>'">`
+                    : `<div class="search-cover-placeholder"><i class="bi bi-book"></i></div>`;
 
                 return `
-                    <a href="#" class="list-group-item list-group-item-action bg-dark text-light"
+                    <a href="#" class="list-group-item list-group-item-action bg-dark text-light search-result-item"
+                       data-book-id="${bookId}"
+                       data-idx="${idx}"
+                       onmouseenter="showHoverCard(event, ${bookId})"
+                       onmouseleave="hideHoverCard()"
                        onclick="selectResult(${idx}); return false;">
-                        <div class="d-flex justify-content-between">
-                            <span><strong>${escapeHtml(title)}</strong>${series}</span>
-                            <small class="text-muted">${year}</small>
+                        <div class="d-flex align-items-start gap-2">
+                            <div class="search-cover-container">${coverHtml}</div>
+                            <div class="flex-grow-1" style="min-width: 0;">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div class="fw-bold text-truncate" style="flex: 1;">${escapeHtml(title)}</div>
+                                    <span class="badge bg-${completenessColor} ms-2" title="${missingTooltip}" style="font-size: 0.65rem;">
+                                        <i class="bi bi-${completenessIcon}"></i> ${completeness}%
+                                    </span>
+                                </div>
+                                <div class="text-info small">${escapeHtml(author)}</div>
+                                ${series ? `<div class="text-warning small">${escapeHtml(series)}</div>` : ''}
+                                <div class="d-flex gap-2 small text-muted mt-1">
+                                    ${year ? `<span><i class="bi bi-calendar"></i> ${year}</span>` : ''}
+                                    ${isbn ? `<span><i class="bi bi-upc"></i> ${isbn}</span>` : ''}
+                                </div>
+                            </div>
                         </div>
-                        <small class="text-info">${escapeHtml(author)}</small>
                     </a>
                 `;
             }).join('');
@@ -482,6 +628,290 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ===== HOVER CARD FUNCTIONS =====
+let hoverTimeout = null;
+let hoverCardVisible = false;
+let cachedBookDetails = {};  // Cache to avoid repeated API calls
+let currentHoverBookId = null;
+let detailModal = null;
+let currentDetailBook = null;
+
+function showHoverCard(event, bookId) {
+    if (!bookId) return;
+    currentHoverBookId = bookId;
+
+    // Clear any pending hide
+    if (hoverTimeout) {
+        clearTimeout(hoverTimeout);
+        hoverTimeout = null;
+    }
+
+    // Position the card
+    const card = document.getElementById('book-hover-card');
+    const rect = event.target.getBoundingClientRect();
+
+    // Position to the right of the item, or left if not enough space
+    let left = rect.right + 10;
+    if (left + 400 > window.innerWidth) {
+        left = rect.left - 390;
+    }
+
+    card.style.left = left + 'px';
+    card.style.top = Math.max(10, rect.top - 50) + 'px';
+
+    // Show loading state
+    document.getElementById('hover-title').textContent = 'Loading...';
+    document.getElementById('hover-author').textContent = '';
+    document.getElementById('hover-series').textContent = '';
+    document.getElementById('hover-meta').textContent = '';
+    document.getElementById('hover-description').textContent = '';
+    document.getElementById('hover-tags').innerHTML = '';
+    document.getElementById('hover-abs-status').style.display = 'none';
+    document.getElementById('hover-cover-container').innerHTML = '<div class="book-cover-placeholder"><i class="bi bi-book"></i></div>';
+
+    card.classList.add('show');
+    hoverCardVisible = true;
+
+    // Check cache first
+    if (cachedBookDetails[bookId]) {
+        renderHoverCard(cachedBookDetails[bookId]);
+        return;
+    }
+
+    // Fetch book details
+    fetch(`/api/book_detail/${bookId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (currentHoverBookId !== bookId) return;  // User moved to another item
+
+            if (data.error) {
+                document.getElementById('hover-title').textContent = 'Error loading details';
+                return;
+            }
+
+            cachedBookDetails[bookId] = data;
+            renderHoverCard(data);
+        })
+        .catch(e => {
+            if (currentHoverBookId === bookId) {
+                document.getElementById('hover-title').textContent = 'Failed to load';
+            }
+        });
+}
+
+function renderHoverCard(data) {
+    const book = data.book;
+    const absStatus = data.abs_status || [];
+
+    document.getElementById('hover-title').textContent = book.title || 'Unknown Title';
+    document.getElementById('hover-author').textContent = book.author_name || 'Unknown Author';
+
+    // Series
+    if (book.series_name) {
+        const pos = book.series_position ? ` #${book.series_position}` : '';
+        document.getElementById('hover-series').textContent = `${book.series_name}${pos}`;
+    } else {
+        document.getElementById('hover-series').textContent = '';
+    }
+
+    // Meta line (year, pages, language)
+    let meta = [];
+    if (book.year_published) meta.push(book.year_published);
+    if (book.page_count) meta.push(`${book.page_count} pages`);
+    if (book.language && book.language !== 'eng') meta.push(book.language);
+    if (book.publisher) meta.push(book.publisher);
+    document.getElementById('hover-meta').textContent = meta.join(' · ');
+
+    // Description (truncated)
+    const desc = book.description || '';
+    document.getElementById('hover-description').textContent = desc.length > 200 ? desc.substring(0, 200) + '...' : desc;
+
+    // Cover
+    if (book.cover_url) {
+        document.getElementById('hover-cover-container').innerHTML = `<img src="${book.cover_url}" class="book-cover" alt="Cover" onerror="this.outerHTML='<div class=\\'book-cover-placeholder\\'><i class=\\'bi bi-book\\'></i></div>'">`;
+    }
+
+    // Tags (subjects)
+    const tagsContainer = document.getElementById('hover-tags');
+    if (book.subjects) {
+        const subjects = book.subjects.split(',').slice(0, 5);
+        tagsContainer.innerHTML = subjects.map(s => `<span class="book-tag">${escapeHtml(s.trim())}</span>`).join('');
+    } else {
+        tagsContainer.innerHTML = '';
+    }
+
+    // ABS Status
+    const absSection = document.getElementById('hover-abs-status');
+    const absUsersDiv = document.getElementById('hover-abs-users');
+    if (absStatus.length > 0) {
+        absSection.style.display = 'block';
+        absUsersDiv.innerHTML = absStatus.map(u => {
+            const icon = u.is_finished ? '✅' : '🎧';
+            const pct = u.progress + '%';
+            return `<div class="abs-user">
+                <span>${icon}</span>
+                <span>${escapeHtml(u.username)}</span>
+                <div class="progress">
+                    <div class="progress-bar ${u.is_finished ? 'bg-success' : 'bg-info'}" style="width: ${u.progress}%"></div>
+                </div>
+                <span class="text-muted">${pct}</span>
+            </div>`;
+        }).join('');
+    } else {
+        absSection.style.display = 'none';
+    }
+}
+
+function hideHoverCard() {
+    // Delay hiding to allow moving to the card
+    hoverTimeout = setTimeout(() => {
+        const card = document.getElementById('book-hover-card');
+        card.classList.remove('show');
+        hoverCardVisible = false;
+        currentHoverBookId = null;
+    }, 200);
+}
+
+// Keep card visible when hovering over the card itself
+document.getElementById('book-hover-card').addEventListener('mouseenter', () => {
+    if (hoverTimeout) {
+        clearTimeout(hoverTimeout);
+        hoverTimeout = null;
+    }
+});
+
+document.getElementById('book-hover-card').addEventListener('mouseleave', () => {
+    hideHoverCard();
+});
+
+// ===== DETAIL MODAL FUNCTIONS =====
+function showBookDetail(bookId) {
+    if (!detailModal) {
+        detailModal = new bootstrap.Modal(document.getElementById('bookDetailModal'));
+    }
+
+    // Reset modal
+    document.getElementById('detail-title').textContent = 'Loading...';
+    document.getElementById('detail-author').textContent = '';
+    document.getElementById('detail-series').style.display = 'none';
+    document.getElementById('detail-year-container').style.display = 'none';
+    document.getElementById('detail-pages-container').style.display = 'none';
+    document.getElementById('detail-language-container').style.display = 'none';
+    document.getElementById('detail-isbns').style.display = 'none';
+    document.getElementById('detail-subjects').innerHTML = '';
+    document.getElementById('detail-description').textContent = '';
+    document.getElementById('detail-abs-section').style.display = 'none';
+    document.getElementById('detail-cover-container').innerHTML = '<div class="book-cover-placeholder" style="width: 150px; height: 220px; margin: auto;"><i class="bi bi-book" style="font-size: 3rem;"></i></div>';
+
+    detailModal.show();
+
+    // Fetch with ABS data
+    fetch(`/api/book_detail/${bookId}?include_abs=true`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                document.getElementById('detail-title').textContent = 'Error: ' + data.error;
+                return;
+            }
+
+            currentDetailBook = data.book;
+            renderDetailModal(data);
+        })
+        .catch(e => {
+            document.getElementById('detail-title').textContent = 'Failed to load: ' + e;
+        });
+}
+
+function renderDetailModal(data) {
+    const book = data.book;
+    const absStatus = data.abs_status || [];
+
+    document.getElementById('detail-title').textContent = book.title || 'Unknown Title';
+    document.getElementById('detail-author').textContent = book.author_name || 'Unknown Author';
+
+    // Series
+    if (book.series_name) {
+        const pos = book.series_position ? ` #${book.series_position}` : '';
+        document.getElementById('detail-series').textContent = `${book.series_name}${pos}`;
+        document.getElementById('detail-series').style.display = 'block';
+    }
+
+    // Year, pages, language
+    if (book.year_published) {
+        document.getElementById('detail-year').textContent = book.year_published;
+        document.getElementById('detail-year-container').style.display = 'block';
+    }
+    if (book.page_count) {
+        document.getElementById('detail-pages').textContent = book.page_count;
+        document.getElementById('detail-pages-container').style.display = 'block';
+    }
+    if (book.language) {
+        document.getElementById('detail-language').textContent = book.language.toUpperCase();
+        document.getElementById('detail-language-container').style.display = 'block';
+    }
+
+    // ISBN
+    const isbn = book.isbn13 || book.isbn10 || book.isbn;
+    if (isbn) {
+        document.getElementById('detail-isbn').textContent = isbn;
+        document.getElementById('detail-isbns').style.display = 'block';
+    }
+
+    // Subjects
+    if (book.subjects) {
+        const subjects = book.subjects.split(',').slice(0, 10);
+        document.getElementById('detail-subjects').innerHTML = subjects.map(s =>
+            `<span class="badge bg-secondary me-1 mb-1">${escapeHtml(s.trim())}</span>`
+        ).join('');
+    }
+
+    // Description
+    document.getElementById('detail-description').innerHTML = book.description ?
+        `<p class="text-muted">${escapeHtml(book.description)}</p>` :
+        '<p class="text-muted fst-italic">No description available</p>';
+
+    // Cover
+    if (book.cover_url) {
+        document.getElementById('detail-cover-container').innerHTML = `<img src="${book.cover_url}" style="max-width: 150px; max-height: 220px; border-radius: 8px;" alt="Cover" onerror="this.outerHTML='<div class=\\'book-cover-placeholder\\' style=\\'width: 150px; height: 220px; margin: auto;\\'><i class=\\'bi bi-book\\' style=\\'font-size: 3rem;\\'></i></div>'">`;
+    }
+
+    // ABS Status
+    if (absStatus.length > 0) {
+        document.getElementById('detail-abs-section').style.display = 'block';
+        document.getElementById('detail-abs-users').innerHTML = absStatus.map(u => {
+            const icon = u.is_finished ? '✅ Finished' : `🎧 ${u.progress}%`;
+            return `<div class="d-flex justify-content-between align-items-center py-1">
+                <span>${escapeHtml(u.username)}</span>
+                <span>${icon}</span>
+            </div>`;
+        }).join('');
+    }
+}
+
+function useBookFromDetail() {
+    if (!currentDetailBook) return;
+
+    // Find in search results
+    const idx = window._searchResults?.findIndex(b => b.id === currentDetailBook.id);
+    if (idx >= 0) {
+        selectResult(idx);
+    } else {
+        // Direct fill if not in results
+        document.getElementById('edit-author').value = currentDetailBook.author_name || '';
+        document.getElementById('edit-title').value = currentDetailBook.title || '';
+        selectedBookDBResult = currentDetailBook;
+
+        const matchDiv = document.getElementById('selected-match');
+        const matchText = document.getElementById('selected-match-text');
+        const series = currentDetailBook.series_name ? ` (${currentDetailBook.series_name})` : '';
+        matchText.textContent = `${currentDetailBook.author_name || 'Unknown'} - ${currentDetailBook.title}${series}`;
+        matchDiv.classList.remove('d-none');
+        document.getElementById('search-results').style.display = 'none';
+    }
+
+    detailModal.hide();
 }
 </script>
 {% endblock %}

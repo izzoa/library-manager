@@ -679,9 +679,18 @@ def clean_search_title(messy_name):
     # Remove parenthetical junk like (Unabridged), (2019)
     clean = re.sub(r'\((?:Unabridged|Abridged|\d{4}|MP3|M4B|EPUB|PDF|64k|128k|r\d+\.\d+).*?\)', '', clean, flags=re.IGNORECASE)
     # Remove file extensions
-    clean = re.sub(r'\.(mp3|m4b|m4a|epub|pdf|mobi)$', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'\.(mp3|m4b|m4a|epub|pdf|mobi|webm|opus)$', '', clean, flags=re.IGNORECASE)
     # Remove "by Author" at the end temporarily for searching
     clean = re.sub(r'\s+by\s+[\w\s]+$', '', clean, flags=re.IGNORECASE)
+    # Remove audiobook-related junk (YouTube rip artifacts)
+    clean = re.sub(r'\b(full\s+)?audiobook\b', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'\b(complete|unabridged|abridged)\b', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'\b(audio\s*book|audio)\b', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'\b(free|download|hd|hq)\b', '', clean, flags=re.IGNORECASE)
+    # Remove years at the end like "2020" or "2019"
+    clean = re.sub(r'\b(19|20)\d{2}\b\s*$', '', clean)
+    # Remove extra whitespace
+    clean = re.sub(r'\s+', ' ', clean)
     # Remove leading/trailing junk
     clean = clean.strip(' -_.')
     return clean
@@ -4288,6 +4297,154 @@ def api_search_bookdb():
     except Exception as e:
         logger.error(f"BookBucket search error: {e}")
         return jsonify({'error': str(e), 'results': []})
+
+
+@app.route('/api/bookdb_stats')
+def api_bookdb_stats():
+    """Get BookBucket database statistics (book/author/series counts)."""
+    try:
+        resp = requests.get(
+            f"{BOOKBUCKET_URL}/stats",
+            headers={"X-API-Key": BOOKBUCKET_API_KEY},
+            timeout=5
+        )
+        if resp.status_code == 200:
+            return jsonify(resp.json())
+        return jsonify({'error': f'BookBucket API error: {resp.status_code}'})
+    except requests.exceptions.ConnectionError:
+        return jsonify({'error': 'BookBucket API not available'})
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+@app.route('/api/book_detail/<int:book_id>')
+def api_book_detail(book_id):
+    """
+    Get full book details from BookBucket + ABS status.
+    Used for hover cards and detail modals.
+    """
+    try:
+        # Fetch full book details from BookBucket
+        resp = requests.get(
+            f"{BOOKBUCKET_URL}/book/{book_id}",
+            headers={"X-API-Key": BOOKBUCKET_API_KEY},
+            timeout=10
+        )
+
+        if resp.status_code != 200:
+            return jsonify({'error': f'Book not found (status {resp.status_code})'})
+
+        book = resp.json()
+
+        # Try to find matching item in ABS by title/author
+        abs_status = []
+        include_abs = request.args.get('include_abs', 'false').lower() == 'true'
+
+        if include_abs and book.get('title'):
+            try:
+                # Get ABS client
+                abs_client = get_abs_client()
+                if abs_client:
+                    # Search ABS by title
+                    libraries = abs_client.get_libraries()
+                    title_lower = book.get('title', '').lower()
+                    author_lower = (book.get('author_name') or '').lower()
+
+                    for lib in libraries:
+                        items_data = abs_client.get_library_items(lib['id'], include_progress=False, limit=0)
+                        items = items_data.get('results', [])
+
+                        for item in items:
+                            media = item.get('media', {})
+                            metadata = media.get('metadata', {})
+                            item_title = (metadata.get('title') or '').lower()
+                            item_author = (metadata.get('authorName') or '').lower()
+
+                            # Simple fuzzy match - title contains search term
+                            if title_lower in item_title or item_title in title_lower:
+                                # Check author too if we have it
+                                if not author_lower or author_lower in item_author or item_author in author_lower:
+                                    # Found a match! Get user progress
+                                    item_id = item.get('id')
+                                    library_with_progress = abs_client.get_library_with_all_progress(lib['id'])
+
+                                    for lib_item in library_with_progress:
+                                        if lib_item.get('id') == item_id:
+                                            user_progress = lib_item.get('user_progress', {})
+                                            for user_id, progress in user_progress.items():
+                                                abs_status.append({
+                                                    'username': progress.get('username', 'Unknown'),
+                                                    'progress': round(progress.get('progress', 0) * 100),
+                                                    'is_finished': progress.get('is_finished', False),
+                                                    'library_name': lib.get('name', 'Library')
+                                                })
+                                            break
+                                    break
+            except Exception as e:
+                logger.warning(f"ABS lookup failed: {e}")
+
+        return jsonify({
+            'book': book,
+            'abs_status': abs_status
+        })
+
+    except requests.exceptions.ConnectionError:
+        return jsonify({'error': 'BookBucket API not available'})
+    except Exception as e:
+        logger.error(f"Book detail error: {e}")
+        return jsonify({'error': str(e)})
+
+
+@app.route('/api/author_detail/<int:author_id>')
+def api_author_detail(author_id):
+    """
+    Get author details from BookBucket.
+    Used for hover cards on author search results.
+    """
+    try:
+        resp = requests.get(
+            f"{BOOKBUCKET_URL}/author/{author_id}",
+            headers={"X-API-Key": BOOKBUCKET_API_KEY},
+            timeout=10
+        )
+
+        if resp.status_code != 200:
+            return jsonify({'error': f'Author not found (status {resp.status_code})'})
+
+        author = resp.json()
+        return jsonify({'author': author})
+
+    except requests.exceptions.ConnectionError:
+        return jsonify({'error': 'BookBucket API not available'})
+    except Exception as e:
+        logger.error(f"Author detail error: {e}")
+        return jsonify({'error': str(e)})
+
+
+@app.route('/api/series_detail/<int:series_id>')
+def api_series_detail(series_id):
+    """
+    Get series details from BookBucket.
+    Used for hover cards on series search results.
+    """
+    try:
+        resp = requests.get(
+            f"{BOOKBUCKET_URL}/series/{series_id}",
+            headers={"X-API-Key": BOOKBUCKET_API_KEY},
+            timeout=10
+        )
+
+        if resp.status_code != 200:
+            return jsonify({'error': f'Series not found (status {resp.status_code})'})
+
+        series = resp.json()
+        return jsonify({'series': series})
+
+    except requests.exceptions.ConnectionError:
+        return jsonify({'error': 'BookBucket API not available'})
+    except Exception as e:
+        logger.error(f"Series detail error: {e}")
+        return jsonify({'error': str(e)})
 
 
 @app.route('/api/manual_match', methods=['POST'])

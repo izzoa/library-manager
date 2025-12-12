@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Library Manager - Reddit Replies</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #00d4ff;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 40px;
+        }
+        .reply-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            backdrop-filter: blur(10px);
+        }
+        .reply-card h2 {
+            color: #ff6b6b;
+            margin-top: 0;
+            font-size: 1.2em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .reply-card h2::before {
+            content: "🔴";
+        }
+        .reply-content {
+            line-height: 1.7;
+            white-space: pre-wrap;
+        }
+        .reply-content p {
+            margin: 0 0 15px 0;
+        }
+        .copy-btn {
+            background: #00d4ff;
+            color: #1a1a2e;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 15px;
+            transition: all 0.2s;
+        }
+        .copy-btn:hover {
+            background: #00b8e6;
+            transform: translateY(-2px);
+        }
+        .copy-btn:active {
+            transform: translateY(0);
+        }
+        .copied {
+            background: #4caf50 !important;
+        }
+        .note {
+            background: rgba(255, 193, 7, 0.1);
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin-top: 40px;
+            border-radius: 0 8px 8px 0;
+        }
+        .note h3 {
+            color: #ffc107;
+            margin-top: 0;
+        }
+        code {
+            background: rgba(0, 212, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Library Manager</h1>
+        <p class="subtitle">Reddit Reply Templates - Addressing Safety Concerns</p>
+
+        <div class="reply-card">
+            <h2>Response to "Concern About AI File Operations"</h2>
+            <div class="reply-content" id="reply1">Hey, I'm the developer. This is totally valid concern and I appreciate you raising it.
+
+You're right to be cautious - we're talking about file operations here, and bugs can happen. A few things that might help ease concerns:
+
+1. **Preview mode is default** - Nothing moves until you explicitly click "Apply Fix" on individual items. You can review every proposed change first.
+
+2. **Safety checks are built in** - The system validates paths stay within your configured library directories, checks minimum folder depth, and blocks anything that looks like directory traversal.
+
+3. **It's conservative** - If the metadata lookup doesn't return high-confidence results, it doesn't suggest changes. Better to miss some than to mess things up.
+
+That said, I'm one developer building this in my spare time. I test thoroughly but I'm not pretending it's bulletproof. Always have backups. Seriously. If you don't trust it yet, that's smart - watch the project, wait for it to mature, let braver folks find the edge cases first.
+
+The goal is to make library management easier, not to create stress. If you try it and something seems off, please report it - that's how it gets better.</div>
+            <button class="copy-btn" onclick="copyReply('reply1', this)">Copy to Clipboard</button>
+        </div>
+
+        <div class="reply-card">
+            <h2>Response to "not_a_name_pattern" Question</h2>
+            <div class="reply-content" id="reply2">Glad the books showed up! 59,732 files is a lot to process - the initial scan takes a while but subsequent scans are much faster since it caches what it's already seen.
+
+**About "not_a_name_pattern":** This happens when the folder/file naming doesn't match the patterns the scanner expects for extracting author and title. Common patterns it recognizes:
+
+- `Author Name - Book Title/`
+- `Author Name/Book Title/`
+- `Book Title (Author Name)/`
+
+If your folders are named differently (like just `Book Title/` with no author, or `Series Name - Book 01/`), it can't confidently parse out the author name and flags it.
+
+**Manual editing feature:** I've just added a basic framework for manual book matching in the Queue page. You can now click the edit (pencil) button on any item to:
+- Manually set author/title
+- Search our 49M+ book database to find the correct match
+- Select from results to auto-fill the fields
+
+**Note:** This is an early implementation - use it cautiously and review the pending fixes before applying. It saves as "pending" so you can review everything before any files are actually renamed.
+
+**Documentation:** Still pretty sparse right now - the GitHub README has the basics, but better docs are coming. If you hit specific issues, feel free to ask here or open an issue!
+
+What naming convention do you use for your audiobooks? I might be able to add a pattern for it.</div>
+            <button class="copy-btn" onclick="copyReply('reply2', this)">Copy to Clipboard</button>
+        </div>
+
+        <div class="reply-card">
+            <h2>Response to "Multiple Versions & Naming Convention"</h2>
+            <div class="reply-content" id="reply3">Thanks for testing and the detailed feedback!
+
+**Edit:** This is actually an issue I noticed with my own Clive Barker library - it tossed every version of one book into the same folder. Been actively working on a fix for this.
+
+**1. Multiple Audiobook Versions**
+
+You're right - this is a real gap. The tricky part is getting consistent metadata - some sources are toast, some are limited, so I'm having the AI guess based on the title and its metadata (currently treating things like narrator names and years as version indicators).
+
+I'm implementing version-aware renaming that will:
+- Give different editions their own directories
+- Different narrators get their own folders: `Title {Ray Porter}/` vs `Title {Jim Dale}/`
+- Edition markers in brackets: `Title [30th Anniversary Edition]/`
+- Variants like Graphic Audio: `Title [Graphic Audio]/`
+
+**2. Custom Naming Convention**
+
+Totally understand. The two preset options cover the most common setups, but power users want more control.
+
+Custom naming templates are on the roadmap - something like:
+```
+{author}/{series}/{position} - {title}
+{author} - {title} ({year})
+{author}/{title} ({narrator})
+```
+
+It's a bigger feature to implement properly (all the edge cases), but it's definitely coming.
+
+Thanks for trying it and getting back!</div>
+            <button class="copy-btn" onclick="copyReply('reply3', this)">Copy to Clipboard</button>
+        </div>
+
+        <div class="reply-card">
+            <h2>Response to "YouTube Rip Not Showing Up"</h2>
+            <div class="reply-content" id="reply4">YouTube rips are tricky because they usually come with zero embedded metadata - AudiobookShelf doesn't know what to do with them.
+
+**Quick fixes to try:**
+
+1. **Check the folder structure** - ABS expects something like:
+   ```
+   Author Name/Book Title/audiofile.mp3
+   ```
+   or at minimum:
+   ```
+   Book Title/audiofile.mp3
+   ```
+   If your file is just sitting loose or in a weird folder structure, ABS might ignore it.
+
+2. **Check the file format** - YouTube rips are usually .m4a, .webm, or .opus. ABS supports these, but sometimes .webm files cause issues. Try converting to .mp3 or .m4a if it's a weird format.
+
+3. **Add basic metadata** - Use a tool like Kid3 or Mp3tag to add at minimum:
+   - Title
+   - Artist/Author
+   - Album (book title)
+
+   Without this, ABS has nothing to work with.
+
+4. **Force a library scan** - In ABS, go to your library settings and click "Force Re-Scan". Sometimes it just needs a kick.
+
+5. **Check ABS logs** - Settings → Logs might show why it's being skipped (wrong format, permission issue, etc.)
+
+**The real fix:** If you're ripping audiobooks from YouTube regularly, consider a workflow that:
+- Downloads to a staging folder
+- Adds metadata (ffmpeg can do this)
+- Moves to your library in the right folder structure
+
+What's the folder structure look like for the book that's not showing? And what file extension is it?</div>
+            <button class="copy-btn" onclick="copyReply('reply4', this)">Copy to Clipboard</button>
+        </div>
+
+        <div class="note">
+            <h3>Context</h3>
+            <p>These replies address concerns about AI-powered file operations in Library Manager. The tool uses metadata matching to suggest file organization improvements, and some users rightfully want to understand the safety measures before trusting it with their libraries.</p>
+            <p><strong>Key safety features:</strong></p>
+            <ul>
+                <li>Preview-only by default (must explicitly apply changes)</li>
+                <li>Path sanitization prevents directory traversal</li>
+                <li>All paths validated to stay within configured library roots</li>
+                <li>Minimum depth checks prevent dumping files at root</li>
+                <li>Conservative matching - skips uncertain cases</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        function copyReply(elementId, button) {
+            const text = document.getElementById(elementId).innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                button.textContent = 'Copied!';
+                button.classList.add('copied');
+                setTimeout(() => {
+                    button.textContent = 'Copy to Clipboard';
+                    button.classList.remove('copied');
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>

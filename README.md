@@ -222,10 +222,32 @@ Missing data is automatically cleaned up - if a book has no narrator, `({narrato
 
 Can't find the right metadata automatically? Use manual matching:
 - Click the **edit (pencil) button** on any queue item
-- Search our **49M+ book database** directly
+- Search our **50M+ book database** directly
 - Select the correct book from results
 - Auto-fills author, title, and series info
 - Review in Pending before applying
+
+### Universal Search
+
+The search covers **everything** - not just titles:
+- **Authors** - Type "jordan" to find Robert Jordan, Michael Jordan, etc.
+- **Series** - Type "wheel of time" to find the series
+- **Years** - Type "2023" to find books published that year
+- **Titles** - Full-text search with fuzzy matching
+
+Results show **metadata completeness** (0-100%) so you can see which books have full data vs. missing fields.
+
+### Smart Filename Cleaning
+
+YouTube rips and messy downloads? No problem:
+- Strips "Audiobook", "Full Audiobook", "Complete", "Unabridged"
+- Removes quality markers, years, brackets, junk
+- Extracts clean searchable title from garbage filenames
+
+```
+Before: "Brandon Sanderson - Mistborn The Final Empire Full Audiobook 2020 [128k]"
+After:  "Brandon Sanderson - Mistborn The Final Empire"
+```
 
 ### Backup & Restore
 
