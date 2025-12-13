@@ -206,15 +206,35 @@
                                     <br><small class="text-muted">Extra verification when author changes completely</small>
                                 </label>
                             </div>
-                            <div class="form-check form-switch">
+                            <div class="form-check form-switch mb-2">
                                 <input class="form-check-input" type="checkbox" name="series_grouping" id="series_grouping"
                                        {% if config.series_grouping %}checked{% endif %}>
                                 <label class="form-check-label" for="series_grouping">
                                     <strong>Series Grouping</strong>
                                     <span class="badge bg-info">BETA</span>
                                     <br><small class="text-muted">Group series books: <code>Author/Series/1 - Title</code></small>
-                                    <br><small class="text-warning">Work in progress - brave testers welcome! Please report issues.</small>
                                 </label>
+                            </div>
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" name="ebook_management" id="ebook_management"
+                                       {% if config.ebook_management %}checked{% endif %} onchange="toggleEbookOptions()">
+                                <label class="form-check-label" for="ebook_management">
+                                    <strong>Ebook Management</strong>
+                                    <span class="badge bg-info">BETA</span>
+                                    <br><small class="text-muted">Organize ebooks (.epub, .mobi, .azw3, .pdf)</small>
+                                </label>
+                            </div>
+                            <div id="ebook-options" class="ms-4 mb-2" style="display: none;">
+                                <label class="form-label small">Ebook Library Mode</label>
+                                <select class="form-select form-select-sm bg-dark text-light" name="ebook_library_mode" style="max-width: 250px;">
+                                    <option value="merge" {% if config.ebook_library_mode == 'merge' %}selected{% endif %}>
+                                        Merge with Audiobooks (ABS)
+                                    </option>
+                                    <option value="separate" {% if config.ebook_library_mode == 'separate' %}selected{% endif %}>
+                                        Separate Ebook Library
+                                    </option>
+                                </select>
+                                <small class="text-muted d-block mt-1">Merge: puts ebook in same Author/Title/ folder as audiobook</small>
                             </div>
                         </div>
                     </div>
@@ -505,9 +525,15 @@ function toggleProviderFields() {
     document.getElementById('gemini-settings').style.display = provider === 'gemini' ? 'block' : 'none';
 }
 
+function toggleEbookOptions() {
+    const enabled = document.getElementById('ebook_management').checked;
+    document.getElementById('ebook-options').style.display = enabled ? 'block' : 'none';
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     toggleProviderFields();
     toggleCustomNaming();
+    toggleEbookOptions();
     updateNamingPreview();
     refreshLogs();
 });

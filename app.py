@@ -52,10 +52,16 @@ class SearchProgress:
             'total': 0,
             'processed': 0,
             'current_item': None,
+            'status_message': None,  # Real-time status for user feedback
             'results': [],
             'started_at': None,
             'queue': []  # Items waiting to be processed
         }
+
+    def set_status(self, message):
+        """Set current status message for user feedback (e.g., 'BookDB timeout, trying AI...')"""
+        with self._lock:
+            self._state['status_message'] = message
 
     def start(self, operation, total, queue_items=None):
         """Start a new operation."""
@@ -66,6 +72,7 @@ class SearchProgress:
                 'total': total,
                 'processed': 0,
                 'current_item': None,
+                'status_message': 'Starting...',
                 'results': [],
                 'started_at': datetime.now().isoformat(),
                 'queue': queue_items or []
@@ -379,6 +386,8 @@ DEFAULT_CONFIG = {
     "auto_fix": False,
     "protect_author_changes": True,  # Require approval if author changes completely
     "enabled": True,
+    "ebook_management": False,  # Enable ebook organization (Beta)
+    "ebook_library_mode": "merge",  # "merge" = same folder as audiobooks, "separate" = own library
     "update_channel": "beta",  # "stable", "beta", or "nightly"
     "naming_format": "author/title",  # "author/title", "author - title", "custom"
     "custom_naming_template": "{author}/{title}"  # Custom template with {author}, {title}, {series}, etc.
@@ -2410,25 +2419,35 @@ def handle_chaos_library(lib_path, config=None):
         # Level 2: Search by detected title/filename
         elif title:
             # Try BookBucket API first (50M books, public endpoint, fast)
+            search_progress.set_status(f"Searching BookDB for '{title[:30]}...'")
             api_result = search_bookdb_api(title)
             if api_result and api_result.get('author'):
                 author = api_result.get('author')
                 title = api_result.get('title') or title
                 confidence = 'high'
                 result['identification'] = 'bookdb_api'
+                search_progress.set_status(f"Found in BookDB: {author}")
                 if api_result.get('series'):
                     result['series'] = api_result.get('series')
 
             # Fall back to AI if API didn't find it
             if not author:
+                search_progress.set_status(f"BookDB no match, trying AI for '{title[:30]}...'")
                 ai_result = identify_book_with_ai(group, config)
                 if ai_result and ai_result.get('author'):
                     author = ai_result.get('author')
                     title = ai_result.get('title') or title
                     confidence = ai_result.get('confidence', 'medium')
                     result['identification'] = 'ai'
+                    search_progress.set_status(f"AI identified: {author}")
                     if ai_result.get('series'):
                         result['series'] = ai_result.get('series')
+                else:
+                    search_progress.set_status(f"Could not identify '{title[:30]}...'")
+
+            # Track if we had to fall back
+            if result.get('identification') == 'ai' and api_result is None:
+                result['fallback_reason'] = 'BookDB unavailable or no match'
 
             result['author'] = author or 'Unknown Author'
             result['title'] = title
@@ -2437,10 +2456,12 @@ def handle_chaos_library(lib_path, config=None):
         # Level 3: Numbered/unknown files - need transcription
         elif info.get('needs_identification') and len(files) > 0:
             logger.info(f"CHAOS HANDLER: Attempting audio transcription for unknown group")
+            search_progress.set_status("No title detected, trying audio transcription...")
 
             # Try transcription on first file
             transcription = transcribe_audio_clip(str(files[0]))
             if transcription:
+                search_progress.set_status("Transcription complete, searching...")
                 trans_result = search_by_transcription(transcription, config)
                 if trans_result and trans_result.get('confidence') != 'none':
                     author = trans_result.get('author')
@@ -2448,6 +2469,11 @@ def handle_chaos_library(lib_path, config=None):
                     confidence = trans_result.get('confidence', 'low')
                     result['identification'] = 'transcription'
                     result['transcription_sample'] = transcription[:200]
+                    search_progress.set_status(f"Transcription identified: {author}")
+                else:
+                    search_progress.set_status("Transcription search found no match")
+            else:
+                search_progress.set_status("Audio transcription failed")
 
             result['author'] = author or 'Unknown Author'
             result['title'] = title or f"Unknown Book ({len(files)} files, {info.get('duration_hours', '?')}h)"
@@ -2458,6 +2484,7 @@ def handle_chaos_library(lib_path, config=None):
             result['title'] = title or f"Unknown ({len(files)} files)"
             result['confidence'] = 'none'
             result['identification'] = 'failed'
+            search_progress.set_status("Could not identify - no title or metadata")
 
         # Update progress
         item_name = result.get('title') or f'Group {i+1}'
@@ -3113,6 +3140,17 @@ def find_audio_files(directory):
     return audio_files
 
 
+def find_ebook_files(directory):
+    """Recursively find all ebook files in directory."""
+    ebook_files = []
+    for root, dirs, files in os.walk(directory):
+        for f in files:
+            ext = os.path.splitext(f)[1].lower()
+            if ext in EBOOK_EXTENSIONS:
+                ebook_files.append(os.path.join(root, f))
+    return ebook_files
+
+
 def get_file_signature(filepath, sample_size=8192):
     """Get a signature for duplicate detection (size + partial hash)."""
     try:
@@ -3204,6 +3242,40 @@ def deep_scan_library(config):
                 queued += 1
                 issues_found[path_str] = ['loose_file_no_folder']
                 logger.info(f"Queued loose file: {filename} -> search for: {cleaned_filename}")
+
+        # NEW: Detect loose EBOOK files in library root (when ebook management enabled)
+        if config.get('ebook_management', False):
+            loose_ebooks = []
+            for item in lib_path.iterdir():
+                if item.is_file() and item.suffix.lower() in EBOOK_EXTENSIONS:
+                    loose_ebooks.append(item)
+
+            if loose_ebooks:
+                logger.info(f"Found {len(loose_ebooks)} loose ebook files in library root")
+                for loose_ebook in loose_ebooks:
+                    filename = loose_ebook.stem
+                    cleaned_filename = clean_search_title(filename)
+                    path_str = str(loose_ebook)
+
+                    c.execute('SELECT id FROM books WHERE path = ?', (path_str,))
+                    existing = c.fetchone()
+
+                    if existing:
+                        book_id = existing['id']
+                    else:
+                        c.execute('''INSERT INTO books (path, current_author, current_title, status)
+                                    VALUES (?, ?, ?, ?)''',
+                                 (path_str, 'Unknown', cleaned_filename, 'ebook_loose'))
+                        book_id = c.lastrowid
+
+                    c.execute('''INSERT OR REPLACE INTO queue
+                                (book_id, reason, added_at, priority)
+                                VALUES (?, ?, ?, ?)''',
+                             (book_id, f'ebook_loose:{filename}',
+                              datetime.now().isoformat(), 2))
+                    queued += 1
+                    issues_found[path_str] = ['ebook_loose_file']
+                    logger.info(f"Queued loose ebook: {filename}")
 
         # Second pass: Analyze folder structure
         for author_dir in lib_path.iterdir():
@@ -3371,10 +3443,18 @@ def deep_scan_library(config):
                 if disc_dirs:
                     all_issues.append(f"has_{len(disc_dirs)}_disc_folders")
 
-                # Check for ebook files mixed with audiobooks
+                # Check for ebook files
                 ebook_files = [f for f in title_dir.rglob('*') if f.suffix.lower() in EBOOK_EXTENSIONS]
+                audio_in_folder = [f for f in title_dir.rglob('*') if f.suffix.lower() in AUDIO_EXTENSIONS]
+
                 if ebook_files:
-                    all_issues.append(f"has_{len(ebook_files)}_ebook_files")
+                    if audio_in_folder:
+                        # Mixed folder - ebooks with audiobooks
+                        all_issues.append(f"has_{len(ebook_files)}_ebook_files")
+                    elif config.get('ebook_management', False):
+                        # Ebook-only folder - queue for ebook organization
+                        all_issues.append('ebook_only_folder')
+                        logger.info(f"Found ebook-only folder: {path} ({len(ebook_files)} ebooks)")
 
                 # Store issues
                 if all_issues:
@@ -3660,6 +3740,28 @@ def process_queue(config, limit=None):
                 new_path = new_path / old_path.name
                 logger.info(f"Loose file: will move {old_path.name} to {new_path}")
 
+            # For loose ebook files
+            is_loose_ebook = row['reason'] and row['reason'].startswith('ebook_loose')
+            if is_loose_ebook and old_path.is_file():
+                ebook_mode = config.get('ebook_library_mode', 'merge')
+                if ebook_mode == 'merge':
+                    # Look for existing audiobook folder to merge into
+                    safe_author = sanitize_path_component(new_author)
+                    safe_title = sanitize_path_component(new_title)
+                    potential_audiobook_path = lib_path / safe_author / safe_title
+                    if potential_audiobook_path.exists():
+                        # Found matching audiobook folder - put ebook there
+                        new_path = potential_audiobook_path / old_path.name
+                        logger.info(f"Ebook merge: found audiobook folder, moving to {new_path}")
+                    else:
+                        # No audiobook folder - create ebook folder like normal
+                        new_path = new_path / old_path.name
+                        logger.info(f"Ebook: no audiobook folder found, creating new at {new_path}")
+                else:
+                    # Separate mode - create ebook folder
+                    new_path = new_path / old_path.name
+                    logger.info(f"Ebook: separate mode, moving to {new_path}")
+
             # CRITICAL SAFETY: If path building failed, skip this item
             if new_path is None:
                 logger.error(f"SAFETY BLOCK: Invalid path for '{new_author}' / '{new_title}' - skipping to prevent data loss")
@@ -3940,7 +4042,7 @@ def apply_fix(history_id):
             continue
 
     if not old_path.exists():
-        error_msg = f"Source folder no longer exists: {old_path}"
+        error_msg = f"Source no longer exists: {old_path}"
         c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
                  ('error', error_msg, history_id))
         conn.commit()
@@ -3950,24 +4052,36 @@ def apply_fix(history_id):
     try:
         import shutil
 
+        # Check if we're moving a file (ebook/loose file) vs a folder
+        is_file_move = old_path.is_file()
+
         if new_path.exists():
-            # Destination already exists - check if it has files
-            existing_files = list(new_path.iterdir())
-            if existing_files:
-                # DON'T MERGE - this is likely a different narrator version
-                error_msg = "Destination folder already exists with files - possible different narrator version"
+            if is_file_move:
+                # Moving a file to existing location - destination file already exists
+                error_msg = f"Destination file already exists: {new_path.name}"
                 c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
                          ('error', error_msg, history_id))
                 conn.commit()
                 conn.close()
                 return False, error_msg
             else:
-                # Destination is empty folder - safe to use it
-                shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
-                new_path.rmdir()
-                (new_path.parent / (new_path.name + "_temp")).rename(new_path)
+                # Moving a folder - check if destination has files
+                existing_files = list(new_path.iterdir())
+                if existing_files:
+                    # DON'T MERGE - this is likely a different narrator version
+                    error_msg = "Destination folder already exists with files - possible different narrator version"
+                    c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
+                             ('error', error_msg, history_id))
+                    conn.commit()
+                    conn.close()
+                    return False, error_msg
+                else:
+                    # Destination is empty folder - safe to use it
+                    shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
+                    new_path.rmdir()
+                    (new_path.parent / (new_path.name + "_temp")).rename(new_path)
         else:
-            # Simple rename
+            # Destination doesn't exist - create parent folders and move
             new_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(old_path), str(new_path))
 
@@ -4279,6 +4393,8 @@ def settings_page():
         config['protect_author_changes'] = 'protect_author_changes' in request.form
         config['enabled'] = 'enabled' in request.form
         config['series_grouping'] = 'series_grouping' in request.form
+        config['ebook_management'] = 'ebook_management' in request.form
+        config['ebook_library_mode'] = request.form.get('ebook_library_mode', 'merge')
         config['google_books_api_key'] = request.form.get('google_books_api_key', '').strip() or None
         config['update_channel'] = request.form.get('update_channel', 'stable')
         config['naming_format'] = request.form.get('naming_format', 'author/title')
@@ -4381,20 +4497,34 @@ def api_chaos_apply():
     lib_root = Path(library_paths[0])
     applied = 0
     errors = []
+    skipped = []  # Items that couldn't be identified - left alone on disk
 
     for group in data['groups']:
         author = group.get('author', 'Unknown Author')
         title = group.get('title')
         files = group.get('files', [])
+        confidence = group.get('confidence', 'none')
+        identification = group.get('identification', '')
 
         if not title or not files:
             continue
 
+        # Skip unidentified items - leave them alone on disk
+        # Don't move files to "Unknown Author" folder - that's not helpful
+        if author in ('Unknown Author', 'Unknown', None, '') or confidence == 'none' or identification == 'failed':
+            skipped.append({
+                'title': title or f"Unknown ({len(files)} files)",
+                'files': files,
+                'reason': 'Could not identify - left in place for manual review'
+            })
+            logger.info(f"CHAOS: Skipping unidentified group '{title}' - left in place")
+            continue
+
         # Sanitize path components
-        safe_author = sanitize_path_component(author) or 'Unknown Author'
+        safe_author = sanitize_path_component(author)
         safe_title = sanitize_path_component(title)
-        if not safe_title:
-            errors.append(f"Invalid title: {title}")
+        if not safe_author or not safe_title:
+            errors.append(f"Invalid author/title: {author} / {title}")
             continue
 
         # Create target folder
@@ -4420,6 +4550,8 @@ def api_chaos_apply():
     return jsonify({
         'success': True,
         'applied': applied,
+        'skipped': skipped,  # Items left in place (couldn't identify)
+        'skipped_count': len(skipped),
         'errors': errors
     })
 
