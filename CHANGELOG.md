@@ -2,6 +2,44 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.16] - 2025-12-13
+
+### Added
+- **Smart path analysis** - Intelligent folder structure detection
+  - Works backwards from audio file to library root
+  - Uses 50M book database for author/series lookups
+  - Fuzzy matching (handles "Dark Tower" → "The Dark Tower")
+  - Position-aware disambiguation (Author/Series/Title detection)
+  - AI fallback via Gemini for ambiguous paths
+  - New `/api/analyze_path` endpoint for testing
+- **Integration test environment** - Automated deployment testing
+  - `./test-env/run-integration-tests.sh` - Full test suite
+  - `./test-env/generate-test-library.sh` - Creates 2GB test library
+  - Tests reversed structures, missing authors, edge cases
+  - Verifies Docker deployment works for fresh users
+  - Tests WITHOUT local BookDB (pattern-only fallback)
+- **Docker CI/CD** - Automatic builds to GitHub Container Registry
+  - GitHub Actions workflow builds on push to main
+  - Multi-arch support (amd64, arm64)
+  - Image at `ghcr.io/deucebucket/library-manager:latest`
+  - UnRaid template updated with correct ghcr.io URL
+
+### Fixed
+- **Safe database fallback** - Connection failures no longer assume "not found"
+  - Returns `(found, lookup_succeeded)` tuples
+  - Falls back to pattern-only detection on DB errors
+  - Adds `db_lookup_failed` issue flag when lookups fail
+  - Prevents misclassification due to network/DB issues
+- **Structure reversal detection** - Detects Metro 2033/Dmitry Glukhovsky patterns
+  - Identifies when Series/Author is swapped with Author/Series
+  - Flags for manual review instead of auto-fixing wrong
+
+### Changed
+- Updated PROJECT_BIBLE.md with test documentation and release checklist
+- Added test-env/ to .gitignore (keeps scripts, ignores 2GB test data)
+
+---
+
 ## [0.9.0-beta.15] - 2025-12-13
 
 ### Added

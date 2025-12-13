@@ -11,7 +11,7 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.15"
+APP_VERSION = "0.9.0-beta.16"
 GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
 
 # Versioning Guide:
@@ -36,6 +36,21 @@ import re
 from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, redirect, url_for, send_file
+
+
+# ============== LOCAL BOOKDB CONNECTION ==============
+# Direct SQLite connection to local metadata database for fast lookups
+
+BOOKDB_LOCAL_PATH = "/mnt/rag_data/bookdb/metadata.db"
+
+def get_bookdb_connection():
+    """Get a connection to the local BookDB SQLite database."""
+    if os.path.exists(BOOKDB_LOCAL_PATH):
+        try:
+            return sqlite3.connect(BOOKDB_LOCAL_PATH, timeout=5)
+        except Exception as e:
+            logging.debug(f"Could not connect to local BookDB: {e}")
+    return None
 
 
 # ============== SMART MATCHING UTILITIES ==============
@@ -1727,6 +1742,436 @@ def clean_title(title):
     return cleaned, issues
 
 
+def analyze_full_path(audio_file_path, library_root):
+    """
+    Analyze the COMPLETE path from library root to audio file.
+    Works BACKWARDS from the file to understand the structure.
+
+    Returns dict with:
+        - book_folder: Path to the folder containing this book's audio
+        - detected_author: Best guess at author name
+        - detected_title: Best guess at book title
+        - detected_series: Series name if detected
+        - folder_roles: Dict mapping each folder to its detected role
+        - confidence: How confident we are in the detection
+        - issues: List of potential problems
+    """
+    audio_path = Path(audio_file_path)
+    lib_root = Path(library_root)
+
+    # Get relative path from library root
+    try:
+        rel_path = audio_path.relative_to(lib_root)
+    except ValueError:
+        return None  # File not under library root
+
+    parts = list(rel_path.parts)
+    if len(parts) < 2:  # Just filename, no folder structure
+        return {
+            'book_folder': str(lib_root),
+            'detected_author': 'Unknown',
+            'detected_title': audio_path.stem,
+            'detected_series': None,
+            'folder_roles': {},
+            'confidence': 'low',
+            'issues': ['loose_file_no_structure']
+        }
+
+    # Remove filename, work with folders only
+    filename = parts[-1]
+    folders = parts[:-1]
+
+    # Classify each folder from BOTTOM to TOP
+    folder_roles = {}
+    issues = []
+
+    def looks_like_person_name(name):
+        """Check if name looks like a person's name (First Last pattern)."""
+        patterns = [
+            r'^[A-Z][a-z]+\s+[A-Z][a-z]+$',           # First Last
+            r'^[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+$',  # First Middle Last
+            r'^[A-Z]\.\s*[A-Z][a-z]+$',               # F. Last
+            r'^[A-Z][a-z]+\s+[A-Z]\.\s*[A-Z][a-z]+$', # First M. Last
+            r'^[A-Z][a-z]+,\s+[A-Z][a-z]+$',          # Last, First
+            r'^[A-Z]\.([A-Z]\.)+\s*[A-Z][a-z]+$',     # J.R.R. Tolkien
+        ]
+        return any(re.match(p, name) for p in patterns)
+
+    def looks_like_disc_chapter(name):
+        """Check if folder is a disc/chapter/part folder (not meaningful for title)."""
+        patterns = [
+            r'^(disc|disk|cd|dvd)\s*\d+',
+            r'^(part|chapter|ch)\s*\d+',
+            r'^\d+\s*[-–]\s*(disc|disk|cd|part)',
+            r'^(side)\s*[ab12]',
+            r'^\d{1,2}$',  # Just a number like "1", "01"
+        ]
+        return any(re.search(p, name, re.IGNORECASE) for p in patterns)
+
+    def looks_like_book_number(name):
+        """Check if folder indicates a numbered book in series."""
+        patterns = [
+            r'^(book|vol|volume|part)\s*\d+',
+            r'^\d+\s*[-–:.]\s*\w',  # "01 - Title", "1. Title"
+            r'^#?\d+\s*[-–:]',      # "#1 - Title"
+        ]
+        return any(re.search(p, name, re.IGNORECASE) for p in patterns)
+
+    def looks_like_title_with_year(name):
+        """Check if name looks like a title with a year (series/book name)."""
+        return bool(re.search(r'\b(19[0-9]{2}|20[0-9]{2})\b', name))
+
+    def looks_like_series_name(name):
+        """Check if name looks like a series name."""
+        # Series often have: numbers, "series", "saga", "chronicles", or are the same as child folder
+        patterns = [
+            r'\bseries\b', r'\bsaga\b', r'\bchronicles\b', r'\btrilogy\b',
+            r'\bcycle\b', r'\buniverse\b', r'\bbooks?\b',
+        ]
+        return any(re.search(p, name, re.IGNORECASE) for p in patterns)
+
+    def is_known_series(name):
+        """
+        Check if name matches a series in our database (with fuzzy matching).
+        Returns: (found: bool, lookup_succeeded: bool)
+        - (True, True) = found in database
+        - (False, True) = not found, but lookup worked
+        - (False, False) = lookup failed (connection error, etc)
+        """
+        try:
+            conn = get_bookdb_connection()
+            if conn:
+                cursor = conn.cursor()
+                # Clean name for search
+                clean_name = re.sub(r'[^\w\s]', '', name).strip()
+                # Try exact match first
+                cursor.execute("SELECT COUNT(*) FROM series WHERE LOWER(name) = LOWER(?)", (clean_name,))
+                count = cursor.fetchone()[0]
+                if count > 0:
+                    conn.close()
+                    return (True, True)
+                # Try fuzzy match - handle "Dark Tower" matching "The Dark Tower"
+                # Also handle "Wheel of Time" matching "The Wheel of Time"
+                cursor.execute(
+                    "SELECT COUNT(*) FROM series WHERE LOWER(name) LIKE ? OR LOWER(name) LIKE ?",
+                    (f'%{clean_name.lower()}%', f'%the {clean_name.lower()}%')
+                )
+                count = cursor.fetchone()[0]
+                conn.close()
+                return (count > 0, True)
+        except Exception as e:
+            logging.debug(f"Series lookup failed for '{name}': {e}")
+        return (False, False)  # Lookup failed
+
+    def is_known_author(name):
+        """
+        Check if name matches an author in our database.
+        Returns: (found: bool, lookup_succeeded: bool)
+        - (True, True) = found in database
+        - (False, True) = not found, but lookup worked
+        - (False, False) = lookup failed (connection error, etc)
+        """
+        try:
+            conn = get_bookdb_connection()
+            if conn:
+                cursor = conn.cursor()
+                clean_name = re.sub(r'[^\w\s\.]', '', name).strip()
+                cursor.execute("SELECT COUNT(*) FROM authors WHERE LOWER(name) = LOWER(?)", (clean_name,))
+                count = cursor.fetchone()[0]
+                conn.close()
+                return (count > 0, True)
+        except Exception as e:
+            logging.debug(f"Author lookup failed for '{name}': {e}")
+        return (False, False)  # Lookup failed
+
+    # Work from bottom (closest to files) to top
+    detected_author = None
+    detected_title = None
+    detected_series = None
+    book_folder_idx = None
+
+    for i in range(len(folders) - 1, -1, -1):
+        folder = folders[i]
+
+        if looks_like_disc_chapter(folder):
+            folder_roles[folder] = 'disc_chapter'
+            continue
+
+        # First non-disc folder from bottom is likely the book title
+        if book_folder_idx is None:
+            book_folder_idx = i
+            folder_roles[folder] = 'book_title'
+            detected_title = folder
+
+            # Check if this looks like "SeriesName Book N - ActualTitle"
+            book_num_match = re.match(r'^(.+?)\s*(?:book|vol)\s*\d+\s*[-–:]\s*(.+)$', folder, re.IGNORECASE)
+            if book_num_match:
+                detected_series = book_num_match.group(1).strip()
+                detected_title = book_num_match.group(2).strip()
+            continue
+
+        # Check what this parent folder looks like
+        # Priority: database matches > pattern matches > position-based guesses
+
+        # First check database for definitive matches
+        # Returns (found, lookup_succeeded) tuples
+        author_result = is_known_author(folder)
+        series_result = is_known_series(folder)
+
+        # Extract results - if lookup failed, treat as "unknown" not "not found"
+        db_is_author = author_result[0] if author_result[1] else None  # None = lookup failed
+        db_is_series = series_result[0] if series_result[1] else None
+
+        # Position-aware disambiguation: if we're between author and book, lean towards series
+        # Check if parent folder looks like an author (person name pattern)
+        parent_is_person = i > 0 and looks_like_person_name(folders[i-1])
+        is_middle_position = book_folder_idx is not None and i < book_folder_idx
+
+        # If lookups failed, fall back to pattern-only detection (no database assumptions)
+        if db_is_author is None or db_is_series is None:
+            # Database unavailable - use patterns only, don't make assumptions
+            if 'db_lookup_failed' not in issues:
+                issues.append('db_lookup_failed')
+            if looks_like_person_name(folder):
+                folder_roles[folder] = 'author'
+                detected_author = folder
+            elif looks_like_book_number(folder):
+                folder_roles[folder] = 'book_number'
+            elif looks_like_series_name(folder) or looks_like_title_with_year(folder):
+                folder_roles[folder] = 'series'
+                if detected_series is None:
+                    detected_series = folder
+            elif detected_author is None:
+                if parent_is_person and is_middle_position:
+                    folder_roles[folder] = 'series'
+                    detected_series = folder
+                else:
+                    folder_roles[folder] = 'likely_author'
+                    detected_author = folder
+            continue  # Skip to next folder
+
+        if db_is_author and not db_is_series:
+            # Found in authors DB but not series - but check position context
+            if parent_is_person and is_middle_position and not looks_like_person_name(folder):
+                # Parent looks like author, we're in middle, treat as series
+                folder_roles[folder] = 'series'
+                if detected_series is None:
+                    detected_series = folder
+            else:
+                folder_roles[folder] = 'author'
+                detected_author = folder
+        elif db_is_series and not db_is_author:
+            # Definitely a series from our database
+            folder_roles[folder] = 'series'
+            if detected_series is None:
+                detected_series = folder
+        elif db_is_author and db_is_series:
+            # Ambiguous - found in both databases
+            # Priority: position context > name pattern
+            if parent_is_person and is_middle_position:
+                # Strong contextual signal: parent looks like author, we're between author and book
+                # This is likely a series even if the name looks like a person
+                folder_roles[folder] = 'series'
+                if detected_series is None:
+                    detected_series = folder
+            elif looks_like_person_name(folder) and not is_middle_position:
+                # Looks like a name AND not in a series position - treat as author
+                folder_roles[folder] = 'author'
+                detected_author = folder
+            else:
+                # Default to series when ambiguous
+                folder_roles[folder] = 'series'
+                if detected_series is None:
+                    detected_series = folder
+        elif looks_like_person_name(folder):
+            folder_roles[folder] = 'author'
+            detected_author = folder
+        elif looks_like_book_number(folder):
+            # This folder is a book number, so parent of THAT is probably series or author
+            folder_roles[folder] = 'book_number'
+            # The detected_title should be updated if we have a better one
+            if detected_title and looks_like_book_number(detected_title):
+                # Our "title" was actually a book number folder
+                detected_title = folder
+        elif looks_like_series_name(folder) or looks_like_title_with_year(folder):
+            folder_roles[folder] = 'series'
+            if detected_series is None:
+                detected_series = folder
+        elif detected_author is None:
+            # Contextual guess: if we already have a book title and this folder
+            # is between where author should be and the book, it's likely a series
+            # Structure: Author / Series / BookTitle
+            if book_folder_idx is not None and i < book_folder_idx and not looks_like_person_name(folder):
+                # This is a middle folder - check if parent might be author
+                if i > 0 and looks_like_person_name(folders[i-1]):
+                    folder_roles[folder] = 'series'
+                    detected_series = folder
+                else:
+                    # Assume author at top level
+                    folder_roles[folder] = 'likely_author'
+                    detected_author = folder
+            else:
+                folder_roles[folder] = 'likely_author'
+                detected_author = folder
+
+    # Build book folder path
+    if book_folder_idx is not None:
+        book_folder = lib_root / Path(*folders[:book_folder_idx + 1])
+    else:
+        book_folder = lib_root / Path(*folders)
+
+    # Validate and add issues
+    if detected_author and not looks_like_person_name(detected_author):
+        issues.append(f'author_not_name_pattern:{detected_author}')
+
+    if detected_author and looks_like_title_with_year(detected_author):
+        issues.append(f'author_looks_like_title:{detected_author}')
+
+    if detected_title and looks_like_person_name(detected_title):
+        issues.append(f'title_looks_like_author:{detected_title}')
+
+    # Check for likely reversed structure
+    if (detected_author and detected_title and
+        looks_like_title_with_year(detected_author) and
+        looks_like_person_name(detected_title)):
+        issues.append('STRUCTURE_LIKELY_REVERSED')
+        # Swap them
+        detected_author, detected_title = detected_title, detected_author
+
+    # Confidence level
+    if detected_author and looks_like_person_name(detected_author):
+        confidence = 'high'
+    elif detected_author:
+        confidence = 'medium'
+    else:
+        confidence = 'low'
+
+    return {
+        'book_folder': str(book_folder),
+        'detected_author': detected_author or 'Unknown',
+        'detected_title': detected_title or audio_path.stem,
+        'detected_series': detected_series,
+        'folder_roles': folder_roles,
+        'confidence': confidence,
+        'issues': issues,
+        'depth': len(folders)
+    }
+
+
+def analyze_path_with_ai(full_path, library_root, config, sample_files=None):
+    """
+    Use Gemini AI to analyze an ambiguous folder path.
+    Called when script-based analysis has low confidence.
+
+    Args:
+        full_path: Full path to the book folder
+        library_root: Root of the library
+        config: App config with API keys
+        sample_files: Optional list of audio filenames in the folder
+    """
+    try:
+        rel_path = Path(full_path).relative_to(library_root)
+        path_str = str(rel_path)
+    except ValueError:
+        path_str = full_path
+
+    # Build context about the files
+    files_context = ""
+    if sample_files:
+        files_context = f"\nAudio files in this folder: {', '.join(sample_files[:10])}"
+        if len(sample_files) > 10:
+            files_context += f" (and {len(sample_files) - 10} more)"
+
+    prompt = f"""Analyze this audiobook folder path and identify the structure.
+
+PATH: {path_str}{files_context}
+
+For audiobook libraries, folders typically represent:
+- Author name (person's name like "Brandon Sanderson", "J.R.R. Tolkien")
+- Series name (like "The Wheel of Time", "Metro 2033", "Mistborn")
+- Book title (the actual book name)
+- Disc/Part folders (like "Disc 1", "CD1", "Part 1" - ignore these for metadata)
+
+Analyze this path and determine:
+1. Which folder is the AUTHOR (should be a person's name)
+2. Which folder is the SERIES (if any - optional)
+3. Which folder is the BOOK TITLE
+4. Is the structure correct (Author/Series/Book or Author/Book) or reversed?
+
+IMPORTANT:
+- A year like "2033" or "1984" in a folder name usually means it's a TITLE, not an author
+- Two capitalized words that look like "First Last" are likely an AUTHOR
+- If author and title seem swapped, indicate the correct order
+
+Return JSON only:
+{{
+    "detected_author": "Author Name",
+    "detected_series": "Series Name or null",
+    "detected_title": "Book Title",
+    "structure_correct": true/false,
+    "suggested_path": "Correct/Path/Structure",
+    "confidence": "high/medium/low",
+    "reasoning": "Brief explanation"
+}}"""
+
+    result = call_gemini(prompt, config)
+    if result:
+        return result
+    return None
+
+
+def smart_analyze_path(audio_file_or_folder, library_root, config):
+    """
+    Smart path analysis - tries script first, falls back to AI if needed.
+
+    Returns the analysis result with author, title, series, and any issues.
+    """
+    path = Path(audio_file_or_folder)
+
+    # If it's a folder, find an audio file inside
+    if path.is_dir():
+        audio_files = list(path.rglob('*'))
+        audio_files = [f for f in audio_files if f.suffix.lower() in AUDIO_EXTENSIONS]
+        if audio_files:
+            audio_file = str(audio_files[0])
+            sample_files = [f.name for f in audio_files[:15]]
+        else:
+            return {'error': 'No audio files found'}
+    else:
+        audio_file = str(path)
+        sample_files = [path.name]
+
+    # First try script-based analysis
+    script_result = analyze_full_path(audio_file, library_root)
+
+    if script_result is None:
+        return {'error': 'Path not under library root'}
+
+    # If confidence is high and no major issues, use script result
+    if script_result['confidence'] == 'high' and 'STRUCTURE_LIKELY_REVERSED' not in script_result.get('issues', []):
+        script_result['method'] = 'script'
+        return script_result
+
+    # For low confidence or issues, try AI
+    logger.info(f"Script confidence {script_result['confidence']}, trying AI for: {audio_file_or_folder}")
+
+    ai_result = analyze_path_with_ai(
+        str(path) if path.is_dir() else str(path.parent),
+        library_root,
+        config,
+        sample_files
+    )
+
+    if ai_result:
+        ai_result['method'] = 'ai'
+        ai_result['script_fallback'] = script_result
+        return ai_result
+
+    # Fall back to script result if AI fails
+    script_result['method'] = 'script_fallback'
+    return script_result
+
+
 def analyze_author(author):
     """Analyze author name for issues, return list of issues."""
     issues = []
@@ -2131,6 +2576,38 @@ def deep_scan_library(config):
                 cleaned_title, clean_issues = clean_title(title)
 
                 all_issues = author_issues + title_issues + clean_issues
+
+                # CRITICAL: Detect REVERSED STRUCTURE (Series/Author instead of Author/Series)
+                # When: author folder looks like a title AND title folder looks like an author
+                author_looks_like_title = any(i in author_issues for i in [
+                    'year_in_author', 'title_words_in_author', 'author_contains_book_number',
+                    'not_a_name_pattern', 'author_starts_with_number'
+                ])
+                title_looks_like_author = 'title_looks_like_author' in title_issues
+
+                # Check if title folder is a proper name pattern (First Last)
+                title_is_name_pattern = bool(re.match(
+                    r'^[A-Z][a-z]+\s+[A-Z][a-z]+$|^[A-Z]\.\s*[A-Z][a-z]+$|^[A-Z][a-z]+,\s+[A-Z]',
+                    title
+                ))
+
+                if author_looks_like_title and (title_looks_like_author or title_is_name_pattern):
+                    # This is a reversed structure! Mark it specially
+                    all_issues = ['STRUCTURE_REVERSED'] + all_issues
+                    logger.info(f"Detected reversed structure: '{author}' is title, '{title}' is author")
+
+                    # Set status to 'structure_reversed' so we handle it differently
+                    c.execute('SELECT id FROM books WHERE path = ?', (path,))
+                    existing_rev = c.fetchone()
+                    if existing_rev:
+                        c.execute('UPDATE books SET status = ? WHERE id = ?',
+                                  ('structure_reversed', existing_rev['id']))
+                    else:
+                        c.execute('''INSERT INTO books (path, current_author, current_title, status)
+                                     VALUES (?, ?, ?, 'structure_reversed')''', (path, author, title))
+                    conn.commit()
+                    # Don't add to regular queue - needs special handling
+                    continue
 
                 # Check for nested structure (disc folders inside book folder)
                 nested_dirs = [d for d in title_dir.iterdir() if d.is_dir()]
@@ -3408,6 +3885,9 @@ def api_stats():
     c.execute("SELECT COUNT(*) as count FROM books WHERE status = 'verified'")
     verified = c.fetchone()['count']
 
+    c.execute("SELECT COUNT(*) as count FROM books WHERE status = 'structure_reversed'")
+    structure_reversed = c.fetchone()['count']
+
     conn.close()
 
     return jsonify({
@@ -3416,6 +3896,7 @@ def api_stats():
         'fixed': fixed,
         'pending_fixes': pending,
         'verified': verified,
+        'structure_reversed': structure_reversed,
         'worker_running': is_worker_running(),
         'processing': processing_status
     })
@@ -3435,6 +3916,134 @@ def api_queue():
 
     conn.close()
     return jsonify({'items': items, 'count': len(items)})
+
+@app.route('/api/analyze_path', methods=['POST'])
+def api_analyze_path():
+    """
+    Analyze a path to understand its structure (Author/Series/Book).
+    Uses smart analysis: script first, Gemini AI for ambiguous cases.
+
+    POST body: {"path": "/path/to/folder"}
+    """
+    data = request.get_json() or {}
+    path = data.get('path')
+
+    if not path:
+        return jsonify({'error': 'path is required'}), 400
+
+    config = load_config()
+    lib_paths = config.get('library_paths', [])
+
+    # Find which library this path belongs to
+    library_root = None
+    for lib in lib_paths:
+        if path.startswith(lib):
+            library_root = lib
+            break
+
+    if not library_root:
+        # Try parent folders
+        p = Path(path)
+        for lib in lib_paths:
+            if str(p).startswith(lib) or str(p.parent).startswith(lib):
+                library_root = lib
+                break
+
+    if not library_root and lib_paths:
+        library_root = lib_paths[0]  # Default to first library
+
+    if not library_root:
+        return jsonify({'error': 'No library paths configured'}), 400
+
+    result = smart_analyze_path(path, library_root, config)
+    return jsonify(result)
+
+
+@app.route('/api/structure_reversed')
+def api_structure_reversed():
+    """Get items with reversed folder structure (Series/Author instead of Author/Series)."""
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute('''SELECT id, path, current_author, current_title
+                 FROM books
+                 WHERE status = 'structure_reversed'
+                 ORDER BY path''')
+    items = []
+    for row in c.fetchall():
+        items.append({
+            'id': row['id'],
+            'path': row['path'],
+            'detected_series': row['current_author'],  # What we think is the series/title
+            'detected_author': row['current_title'],   # What we think is the author
+            'suggestion': f"Move to: {row['current_title']}/{row['current_author']}"
+        })
+
+    conn.close()
+    return jsonify({'items': items, 'count': len(items)})
+
+
+@app.route('/api/structure_reversed/fix/<int:book_id>', methods=['POST'])
+def api_fix_structure_reversed(book_id):
+    """Fix a reversed structure by swapping author/title in the path."""
+    conn = get_db()
+    c = conn.cursor()
+
+    c.execute('SELECT * FROM books WHERE id = ?', (book_id,))
+    book = c.fetchone()
+    if not book:
+        return jsonify({'success': False, 'error': 'Book not found'}), 404
+
+    if book['status'] != 'structure_reversed':
+        return jsonify({'success': False, 'error': 'Book is not marked as structure_reversed'}), 400
+
+    old_path = Path(book['path'])
+    detected_series = book['current_author']  # This is actually the series/title
+    detected_author = book['current_title']   # This is actually the author
+
+    # Build new path: Author/Series (or Author/Title if no series)
+    lib_root = old_path.parent.parent  # Go up from Title/Author to library root
+    new_path = lib_root / detected_author / detected_series
+
+    try:
+        if not old_path.exists():
+            c.execute('UPDATE books SET status = ? WHERE id = ?', ('missing', book_id))
+            conn.commit()
+            return jsonify({'success': False, 'error': 'Source path no longer exists'}), 400
+
+        # Create target directory if needed
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Move the folder
+        import shutil
+        shutil.move(str(old_path), str(new_path))
+
+        # Update database
+        c.execute('''UPDATE books SET
+                     path = ?,
+                     current_author = ?,
+                     current_title = ?,
+                     status = 'fixed'
+                     WHERE id = ?''',
+                  (str(new_path), detected_author, detected_series, book_id))
+        conn.commit()
+
+        logger.info(f"Fixed reversed structure: {old_path} -> {new_path}")
+
+        return jsonify({
+            'success': True,
+            'old_path': str(old_path),
+            'new_path': str(new_path),
+            'author': detected_author,
+            'title': detected_series
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to fix reversed structure: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        conn.close()
+
 
 @app.route('/api/worker/start', methods=['POST'])
 def api_start_worker():

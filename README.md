@@ -4,8 +4,8 @@
 
 **Smart Audiobook Library Organizer with Multi-Source Metadata & AI Verification**
 
-[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
-[![Flask](https://img.shields.io/badge/flask-2.0+-green.svg)](https://flask.palletsprojects.com)
+[![Version](https://img.shields.io/badge/version-0.9.0--beta.16-blue.svg)](CHANGELOG.md)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/deucebucket/library-manager)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
 *Automatically fix messy audiobook folders using real book databases + AI intelligence*
@@ -16,481 +16,187 @@
 
 ## The Problem
 
-Audiobook libraries get messy. Downloads from various sources leave you with:
+Audiobook libraries get messy. Downloads leave you with:
 
 ```
 Your Library (Before):
 ├── Shards of Earth/Adrian Tchaikovsky/        # Author/Title swapped!
 ├── Boyett/The Hollow Man/                     # Missing first name
-├── Christopher Golden, Amber Benson/Slayers/  # Wrong author entirely
-├── The Expanse 2019/Leviathan Wakes/          # Year in wrong place
-├── Tchaikovsky, Adrian/Service Model/         # LastName, FirstName format
+├── Metro 2033/Dmitry Glukhovsky/              # Reversed structure
 ├── [bitsearch.to] Dean Koontz - Watchers/     # Junk in filename
+├── The Great Gatsby Full Audiobook.m4b        # Loose file, no folder
 └── Unknown/Mistborn Book 1/                   # No author at all
 ```
-
-Manually researching and fixing hundreds of these? *No thanks.*
 
 ---
 
 ## The Solution
 
-Library Manager combines **4 real book databases** with **AI verification** to intelligently fix your library:
+Library Manager combines **real book databases** (50M+ books) with **AI verification** to fix your library:
 
 ```
 Your Library (After):
-├── Adrian Tchaikovsky/Shards of Earth/        # ✓ Correct!
-├── Steven Boyett/The Hollow Man/              # ✓ Full name found
-├── Christopher Golden/Slayers/                # ✓ Fixed author
-├── James S.A. Corey/Leviathan Wakes/          # ✓ Proper author
-├── Adrian Tchaikovsky/Service Model/          # ✓ Name normalized
-├── Dean Koontz/Watchers/                      # ✓ Cleaned up
-└── Brandon Sanderson/The Final Empire/        # ✓ Found the real book!
+├── Adrian Tchaikovsky/Shards of Earth/
+├── Steven Boyett/The Hollow Man/
+├── Dmitry Glukhovsky/Metro 2033/
+├── Dean Koontz/Watchers/
+├── F. Scott Fitzgerald/The Great Gatsby/
+└── Brandon Sanderson/Mistborn/1 - The Final Empire/
 ```
-
-With **Series Grouping** enabled (Audiobookshelf-compatible):
-```
-├── James S.A. Corey/The Expanse/1 - Leviathan Wakes/
-├── James S.A. Corey/The Expanse/2 - Caliban's War/
-└── Brandon Sanderson/Mistborn/1 - The Final Empire {Kramer}/
-```
-
----
-
-## How It Works
-
-### Multi-Source Metadata Pipeline
-
-Library Manager doesn't just guess—it **verifies against real book databases**:
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        METADATA PIPELINE                            │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│   Your Messy Folder ──► Search APIs ──► Verify ──► Rename          │
-│                              │                                      │
-│                              ▼                                      │
-│                    ┌─────────────────┐                             │
-│                    │  1. Audnexus    │  Audible's audiobook data   │
-│                    │  2. OpenLibrary │  Massive book database      │
-│                    │  3. Google Books│  Wide coverage              │
-│                    │  4. Hardcover   │  Modern/indie books         │
-│                    │  5. AI Fallback │  When APIs can't find it    │
-│                    └─────────────────┘                             │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### Smart Verification System
-
-When metadata is found, the system verifies it makes sense:
-
-| Scenario | What Happens |
-|----------|--------------|
-| **Minor change** (e.g., "Boyett" → "Steven Boyett") | Auto-applied (same person, fuller name) |
-| **Drastic change** (e.g., "Golden" → "Sussman") | **Requires manual approval** to prevent mistakes |
-| **Author/Title swap** (e.g., "Title/Author") | Detected and fixed automatically |
-| **Uncertain match** | Held for review, never auto-applied |
-| **Garbage match** (e.g., "Chapter 19" → "College Accounting") | **Automatically rejected** - won't even suggest it |
-
-### Garbage Match Filtering
-
-APIs sometimes return completely unrelated books. Library Manager uses **Jaccard similarity** to detect and reject these:
-
-```
-✗ "Chapter 19" → "College Accounting, Chapters 1-9"  (only "chapter" matches)
-✗ "Death Genesis" → "The Darkborn AfterLife Genesis" (only "genesis" matches)
-✗ "Mr. Murder" → "Frankenstein"                       (no word overlap at all)
-```
-
-Matches with less than 30% word overlap are automatically rejected.
-
-### Safety First
-
-- **Drastic author changes ALWAYS require approval** - even in auto-fix mode
-- **Garbage matches filtered** - Won't suggest completely unrelated books
-- **Undo any fix** - Every rename can be reverted with one click
-- **History tracking** - See every change that was made
-- **Reject bad suggestions** - Delete wrong AI guesses without applying them
-- **Dismiss errors** - Clear stale error entries when source files no longer exist
-- **System folders ignored** - Won't process `metadata`, `cache`, `streams`, `@eaDir`, etc.
 
 ---
 
 ## Features
 
-### Web Dashboard
-Beautiful dark-themed UI showing:
-- Library statistics (total books, queue size, fixes)
-- Quick action buttons (Scan, Process, Apply Pending)
-- Worker status indicator (running/stopped)
-- Recent activity feed
-- 7-day stats graph
+### Smart Path Analysis
+- Works backwards from audio files to understand folder structure
+- Database-backed author/series detection (50M+ books)
+- Fuzzy matching ("Dark Tower" finds "The Dark Tower")
+- AI fallback for ambiguous cases
+- **Safe fallback** - connection failures don't cause misclassification
 
-### Processing Queue
-- View all books flagged for review
-- Live processing log
-- Progress tracking for bulk operations
-- Remove items from queue (mark as OK)
+### Multi-Source Metadata
+```
+1. Audnexus     - Audible's audiobook data
+2. OpenLibrary  - 50M+ book database
+3. Google Books - Wide coverage
+4. Hardcover    - Modern/indie books
+5. AI Fallback  - Gemini/OpenRouter when APIs fail
+```
 
-### Fix History
-- Complete log of all changes
-- Before/After comparison
-- **Undo button** - Revert any fix instantly
-- **Dismiss errors** - Remove stale entries when files don't exist
-- Status badges (Applied, Pending, Undone, Error)
-
-### Pending Approvals
-- Dedicated page for fixes needing manual review
-- **"Review" badge** highlights drastic author changes
-- **Apply** (✓) or **Reject** (✗) each suggestion
-- Bulk apply all pending fixes
-
-### Orphan File Detection
-Find and organize loose audio files sitting directly in author folders:
-- **Automatic detection** - Reads ID3 metadata (album tag) to identify books
-- **Visual management** - See all orphans with detected titles
-- **One-click organize** - Creates proper book folders and moves files
-- **Edit before organizing** - Change detected title if needed
-- **Batch organize** - Process all orphans at once
-
-### Smart Narrator Preservation
-Keeps different audiobook versions separate:
-- Detects narrator names from folder patterns like `(Kafer)`, `(Vance)`
-- Creates separate folders: `The Hellbound Heart (Kafer)`, `The Hellbound Heart (Barker)`
-- **Won't merge different versions** - Protects your narrator-specific copies
-- Distinguishes narrators from junk: `(Horror)` = genre (stripped), `(Kafer)` = narrator (kept)
+### Safety First
+- **Drastic changes require approval** - author swaps need manual review
+- **Garbage match filtering** - rejects unrelated results (<30% similarity)
+- **Undo any fix** - every rename can be reverted
+- **Structure reversal detection** - catches Metro 2033/Author patterns
+- **System folders ignored** - skips `metadata`, `cache`, `@eaDir`, etc.
 
 ### Series Grouping (Audiobookshelf-Compatible)
-
-Enable series grouping to organize books in a format compatible with Audiobookshelf:
-
-| Setting | Structure | Example |
-|---------|-----------|---------|
-| **Off** | `Author/Title` | `Brandon Sanderson/The Final Empire/` |
-| **On** | `Author/Series/# - Title` | `Brandon Sanderson/Mistborn/1 - The Final Empire/` |
-| **On + Narrator** | `Author/Series/# - Title {Narrator}` | `Brandon Sanderson/Mistborn/1 - The Final Empire {Kramer}/` |
-
-Series detection works from:
-- **API metadata** - Google Books, Audnexus, etc. provide series info
-- **Original folder names** - Extracts series from messy folder names
-- **Title patterns** - Automatically parses titles like:
-  - `The Firefly Series, Book 8: Coup de Grâce` → Series: Firefly, #8
-  - `Mistborn Book 1: The Final Empire` → Series: Mistborn, #1
-  - `The Expanse #3 - Abaddon's Gate` → Series: The Expanse, #3
-  - `Ivypool's Heart (Book 17)` → Extracts book #17
-  - `Would you Love a Monster Girl, Book 5 - Rose` → Series detected, #5
-- **Series-like author folders** - If author folder contains "Series", "Saga", "Edition", etc., it becomes the series name (e.g., `Warriors Super Edition/Book Title (Book 3)`)
-
-Standalone books (not part of a series) remain in `Author/Title` format.
-
-### Customizable Naming Formats
-
-Choose the folder structure that matches your player:
-
-| Format | Example | Compatible With |
-|--------|---------|-----------------|
-| `Author/Title` | `Brandon Sanderson/Mistborn/` | Audiobookshelf, Plex, Jellyfin |
-| `Author - Title` | `Brandon Sanderson - Mistborn/` | Booksonic, basic players |
-| **Custom Template** | Build your own! | Any player |
+```
+Brandon Sanderson/Mistborn/1 - The Final Empire/
+Brandon Sanderson/Mistborn/2 - The Well of Ascension/
+James S.A. Corey/The Expanse/1 - Leviathan Wakes/
+```
 
 ### Custom Naming Templates
-
-Build your own naming convention with clickable tags:
-
-**Available tags:**
-- `{author}` - Author name
-- `{title}` - Book title
-- `{series}` - Series name (if available)
-- `{series_num}` - Series position (1, 2, 3...)
-- `{narrator}` - Narrator name (if available)
-- `{year}` - Publication year
-- `{edition}` - Edition info (e.g., "30th Anniversary")
-- `{variant}` - Format variant (e.g., "Graphic Audio")
-
-**Example templates:**
+Build your own folder structure:
 ```
-{author}/{title}                           → Brandon Sanderson/The Final Empire/
-{author}/{series}/{series_num} - {title}   → Brandon Sanderson/Mistborn/1 - The Final Empire/
-{author} - {title} ({narrator})            → Brandon Sanderson - The Final Empire (Michael Kramer)/
-{author}/{title} [{edition}]               → Brandon Sanderson/The Final Empire [First Edition]/
+{author}/{title}                          → Brandon Sanderson/The Final Empire/
+{author}/{series}/{series_num} - {title}  → Brandon Sanderson/Mistborn/1 - The Final Empire/
+{author} - {title} ({narrator})           → Brandon Sanderson - The Final Empire (Kramer)/
 ```
 
-Missing data is automatically cleaned up - if a book has no narrator, `({narrator})` becomes empty and is removed.
-
-### Manual Book Matching
-
-Can't find the right metadata automatically? Use manual matching:
-- Click the **edit (pencil) button** on any queue item
-- Search our **50M+ book database** directly
-- Select the correct book from results
-- Auto-fills author, title, and series info
-- Review in Pending before applying
-
-### Universal Search
-
-The search covers **everything** - not just titles:
-- **Authors** - Type "jordan" to find Robert Jordan, Michael Jordan, etc.
-- **Series** - Type "wheel of time" to find the series
-- **Years** - Type "2023" to find books published that year
-- **Titles** - Full-text search with fuzzy matching
-
-Results show **metadata completeness** (0-100%) so you can see which books have full data vs. missing fields.
-
-### Smart Filename Cleaning
-
-YouTube rips and messy downloads? No problem:
-- Strips "Audiobook", "Full Audiobook", "Complete", "Unabridged"
-- Removes quality markers, years, brackets, junk
-- Extracts clean searchable title from garbage filenames
-
-```
-Before: "Brandon Sanderson - Mistborn The Final Empire Full Audiobook 2020 [128k]"
-After:  "Brandon Sanderson - Mistborn The Final Empire"
-```
-
-### Backup & Restore
-
-Protect your configuration with built-in backup:
-- **Download backup** - Creates a .zip with all settings, groups, and database
-- **Restore backup** - Upload a previous backup to restore your setup
-- Your current state is backed up before restore (just in case)
-- Found in **Settings → Advanced**
-
-### In-Browser Updates
-
-Update Library Manager without touching the command line:
-- **Check for updates** - Click the version badge (bottom left)
-- **Update Now** - One-click `git pull` from the web UI
-- **Restart App** - Applies changes by restarting the service
-- Works automatically with systemd-managed services
-
-### Loose File Detection
-
-Dropped a file directly in your library? No problem:
-- Detects audio files without proper `Author/Title/` structure
-- Searches our 50M+ book database using the filename
-- Auto-creates the correct folder structure
-- Handles YouTube rips and messy filenames
-
-### Version-Aware Renaming
-
-Different narrators and editions get their own folders:
-- `The Hellbound Heart {Ray Porter}/` vs `The Hellbound Heart {Clive Barker}/`
-- `Dune [30th Anniversary Edition]/` vs `Dune/`
-- `The Way of Kings [Graphic Audio]/`
-
-Smart conflict resolution tries narrator, variant, edition, then year to keep versions separate.
-
-### AI Providers
-
-**Google Gemini** (Recommended)
-- 14,400 free API calls/day
-- Fast and accurate
-- Get key at [aistudio.google.com](https://aistudio.google.com)
-
-**OpenRouter**
-- Access to multiple models
-- Free tier available
-- Supports Claude, GPT-4, Llama, etc.
+### Additional Features
+- **Web dashboard** with dark theme
+- **Manual book matching** - search 50M+ database directly
+- **Loose file detection** - auto-creates folders for dumped files
+- **In-browser updates** - update from the web UI
+- **Backup & restore** - protect your configuration
+- **Version-aware renaming** - different narrators get separate folders
 
 ---
 
 ## Quick Start
 
-### 1. Install
+### Option 1: Docker (Recommended)
+
+```bash
+# Pull from GitHub Container Registry
+docker run -d \
+  --name library-manager \
+  -p 5757:5757 \
+  -v /path/to/audiobooks:/audiobooks \
+  -v library-manager-data:/data \
+  ghcr.io/deucebucket/library-manager:latest
+```
+
+Or with Docker Compose:
+
+```yaml
+version: '3.8'
+services:
+  library-manager:
+    image: ghcr.io/deucebucket/library-manager:latest
+    container_name: library-manager
+    ports:
+      - "5757:5757"
+    volumes:
+      - /your/audiobooks:/audiobooks
+      - library-manager-data:/data
+    restart: unless-stopped
+
+volumes:
+  library-manager-data:
+```
+
+### Option 2: Direct Install
 
 ```bash
 git clone https://github.com/deucebucket/library-manager.git
 cd library-manager
 pip install -r requirements.txt
-```
-
-### 2. Run
-
-```bash
 python app.py
 ```
 
-Open **http://localhost:5757** in your browser.
+### Configure
 
-### 3. Configure (via Web UI)
-
-1. Go to **Settings**
-2. Add your **library path** (e.g., `/mnt/audiobooks`)
-3. Choose **AI Provider** and add API key
-4. Enable **Series Grouping** if you use Audiobookshelf
-5. **Save Settings**
-6. Go to **Dashboard** → **Scan Library**
-
-That's it! Watch as your messy library gets organized.
+1. Open **http://localhost:5757**
+2. Go to **Settings**
+3. Add library path (`/audiobooks` for Docker, or your actual path)
+4. Add AI API key (Gemini recommended - 14,400 free calls/day)
+5. **Save** and **Scan Library**
 
 ---
 
 ## Docker Installation
 
-> **Full Docker Guide:** See [docs/DOCKER.md](docs/DOCKER.md) for complete instructions including UnRaid, Synology, Dockge, and Portainer setup.
+### Volume Mounts
 
-### Quick Start
-
-```bash
-git clone https://github.com/deucebucket/library-manager.git
-cd library-manager
-
-# Edit docker-compose.yml - change the audiobook path to YOUR path
-# Then:
-docker-compose up -d
-```
-
-Open **http://your-server:5757** and set library path to `/audiobooks` in Settings.
-
-### Important: Volume Mounts
-
-Docker containers are isolated. You **must** mount your audiobook folder in `docker-compose.yml`:
+Docker containers are isolated. Mount your audiobook folder:
 
 ```yaml
 volumes:
-  # LEFT = your host path, RIGHT = container path
-  - /your/audiobooks/folder:/audiobooks
+  - /your/audiobooks:/audiobooks  # LEFT = host, RIGHT = container
+  - library-manager-data:/data    # Persistent config/database
 ```
 
-Then use `/audiobooks` (the container path) in Settings. The Settings page cannot access paths that aren't mounted!
+Use `/audiobooks` (container path) in Settings.
 
 ### Platform Examples
 
-| Platform | Volume Mount Example |
-|----------|---------------------|
+| Platform | Volume Mount |
+|----------|-------------|
 | **UnRaid** | `/mnt/user/media/audiobooks:/audiobooks` |
 | **Synology** | `/volume1/media/audiobooks:/audiobooks` |
 | **Linux** | `/home/user/audiobooks:/audiobooks` |
 | **Windows** | `C:/Users/Name/Audiobooks:/audiobooks` |
 
-See [docs/DOCKER.md](docs/DOCKER.md) for detailed platform-specific instructions.
+See [docs/DOCKER.md](docs/DOCKER.md) for detailed setup guides.
 
 ---
 
 ## Configuration
 
-### Settings Tabs
-
-| Tab | Contents |
-|-----|----------|
-| **General** | Library paths, naming format, series grouping, auto-fix toggle, scan interval |
-| **AI Setup** | Provider selection, API keys, model choice |
-| **Advanced** | Danger zone, bug reports, live logs |
-
-### Key Options
+### Key Settings
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `library_paths` | `[]` | Folders to scan (one per line) |
-| `naming_format` | `author/title` | How to structure renamed folders (`author/title`, `author - title`, or `custom`) |
-| `custom_naming_template` | `{author}/{title}` | Custom template with tags (when naming_format is `custom`) |
-| `series_grouping` | `false` | Enable Audiobookshelf-style series folders |
-| `auto_fix` | `false` | Apply fixes automatically vs manual approval |
-| `protect_author_changes` | `true` | Extra verification for drastic changes |
+| `library_paths` | `[]` | Folders to scan |
+| `naming_format` | `author/title` | Folder structure |
+| `series_grouping` | `false` | Audiobookshelf-style series folders |
+| `auto_fix` | `false` | Auto-apply vs manual approval |
+| `protect_author_changes` | `true` | Require approval for author swaps |
 | `scan_interval_hours` | `6` | Auto-scan frequency |
-| `batch_size` | `3` | Books per API batch |
-| `max_requests_per_hour` | `400` | Rate limiting |
 
----
+### AI Providers
 
-## How Detection Works
+**Google Gemini** (Recommended)
+- 14,400 free API calls/day
+- Get key at [aistudio.google.com](https://aistudio.google.com)
 
-Books get flagged for review when they have:
-
-| Issue | Example | Detection |
-|-------|---------|-----------|
-| Year in author | `The Expanse 2019/Leviathan` | Regex: 1950-2030 |
-| Swapped fields | `Mistborn/Brandon Sanderson` | Title looks like name |
-| LastName, First | `Tchaikovsky, Adrian/Book` | Comma detection |
-| Missing author | `Unknown/The Book Title` | Common placeholder |
-| Junk in name | `[site.to] Author - Book` | Brackets, URLs |
-| Title words in author | `The Brandon Sanderson/Book` | Articles in wrong place |
-
----
-
-## API Pipeline Details
-
-### Search Order
-
-1. **Audnexus** - Audible's audiobook database (best for audiobooks)
-2. **OpenLibrary** - Internet Archive's massive book DB
-3. **Google Books** - Wide coverage, good metadata + series info
-4. **Hardcover** - Modern and indie titles
-5. **AI Fallback** - When no API finds a match
-
-### Verification Flow
-
-```
-API finds "Paul Sussman / The Lost Army of Cambyses"
-for your folder "Christopher Golden / The Lost Army"
-
-                    ↓
-
-Is title similar? NO (< 30% word overlap) → GARBAGE MATCH REJECTED
-
-                    ↓ (if title is similar)
-
-Is author completely different? YES → DRASTIC CHANGE DETECTED
-
-                    ↓
-
-Run verification: Search ALL APIs, have AI vote on best match
-
-                    ↓
-
-AI uncertain or says WRONG? → Goes to PENDING (requires your approval)
-AI confident it's correct? → Still goes to PENDING (drastic = always review)
-```
-
----
-
-## Production Deployment
-
-### Systemd Service
-
-```bash
-sudo tee /etc/systemd/system/library-manager.service << 'EOF'
-[Unit]
-Description=Library Manager - Audiobook Organizer
-After=network.target
-
-[Service]
-Type=simple
-User=yourusername
-WorkingDirectory=/path/to/library-manager
-ExecStart=/usr/bin/python3 app.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl enable --now library-manager
-```
-
-### Nginx Reverse Proxy
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name library.yourdomain.com;
-
-    ssl_certificate /etc/letsencrypt/live/library.yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/library.yourdomain.com/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:5757;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
+**OpenRouter**
+- Multiple model options
+- Free tier available
 
 ---
 
@@ -499,78 +205,63 @@ server {
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/scan` | POST | Trigger library scan |
-| `/api/deep_rescan` | POST | Re-verify ALL books with fresh metadata |
-| `/api/process` | POST | Process queue (`{all: true}` or `{limit: N}`) |
-| `/api/queue` | GET | Get current queue items |
-| `/api/stats` | GET | Dashboard statistics |
-| `/api/apply_fix/{id}` | POST | Apply a pending fix |
-| `/api/reject_fix/{id}` | POST | Reject/delete a bad suggestion |
-| `/api/undo/{id}` | POST | Revert an applied fix |
-| `/api/dismiss_error/{id}` | POST | Remove an error entry from history |
-| `/api/apply_all_pending` | POST | Apply all pending fixes at once |
-| `/api/worker/start` | POST | Start background worker |
-| `/api/worker/stop` | POST | Stop background worker |
+| `/api/deep_rescan` | POST | Re-verify all books |
+| `/api/process` | POST | Process queue items |
+| `/api/queue` | GET | Get queue |
+| `/api/stats` | GET | Dashboard stats |
+| `/api/apply_fix/{id}` | POST | Apply pending fix |
+| `/api/reject_fix/{id}` | POST | Reject suggestion |
+| `/api/undo/{id}` | POST | Revert applied fix |
+| `/api/analyze_path` | POST | Test path analysis |
 
 ---
 
 ## Troubleshooting
 
-### "Wrong author detected"
-1. Go to **Pending** page
-2. Find the incorrect suggestion
-3. Click **✗ Reject** to delete it
-4. The book will be marked as "verified OK"
+**Wrong author detected?**
+→ Go to Pending → Click Reject (✗)
 
-### "Want to undo a fix"
-1. Go to **History**
-2. Find the change you want to revert
-3. Click the **↩ Undo** button
-4. Folder will be renamed back to original
+**Want to undo a fix?**
+→ Go to History → Click Undo (↩)
 
-### "Error entry for file that doesn't exist"
-1. Go to **History**
-2. Find the error entry
-3. Click the **🗑 Dismiss** button
-4. Entry will be removed from history
+**Series not detected?**
+→ Enable Series Grouping in Settings → General
 
-### "Deep rescan everything"
-1. Go to **Dashboard**
-2. Click **Deep Re-scan (Verify All)**
-3. This queues ALL books for fresh metadata verification
-4. Useful after updating API keys or fixing bugs
+**Docker can't see files?**
+→ Check volume mounts in docker-compose.yml
 
-### "Series not detected"
-- Make sure **Series Grouping** is enabled in Settings → General → Behavior
-- The title pattern must be recognizable (e.g., "Series Name, Book N: Title")
-- If API doesn't have series info, try a deep rescan
+---
+
+## Development
+
+### Run Tests
+
+```bash
+# Full integration test suite
+./test-env/run-integration-tests.sh
+
+# Rebuild test library first
+./test-env/run-integration-tests.sh --rebuild
+```
+
+### Local Development
+
+```bash
+python app.py  # Runs on http://localhost:5757
+```
 
 ---
 
 ## Contributing
 
-Ideas for future development:
+Pull requests welcome! Ideas:
 - [ ] Ollama/local LLM support
-- [ ] Audiobookshelf API integration
 - [ ] Cover art fetching
-- [ ] Metadata embedding in files
-- [ ] Movie library organization
-- [ ] Music library organization
-- [x] Docker container
-
-Pull requests welcome!
+- [ ] Metadata embedding
+- [ ] Movie/music library support
 
 ---
 
 ## License
 
-MIT License - do whatever you want with it.
-
----
-
-<div align="center">
-
-**Built with [Claude Code](https://claude.ai/code)**
-
-*Making messy audiobook libraries beautiful since 2024*
-
-</div>
+MIT License
