@@ -4,7 +4,7 @@
 
 **Smart Audiobook Library Organizer with Multi-Source Metadata & AI Verification**
 
-[![Version](https://img.shields.io/badge/version-0.9.0--beta.19-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.9.0--beta.22-blue.svg)](CHANGELOG.md)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue.svg)](https://ghcr.io/deucebucket/library-manager)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
@@ -91,6 +91,8 @@ Build your own folder structure:
 - **Manual book matching** - search 50M+ database directly
 - **Loose file detection** - auto-creates folders for dumped files
 - **Ebook management (Beta)** - organize ebooks alongside audiobooks
+- **Health scan** - detect corrupt/incomplete audio files
+- **Audio analysis (Beta)** - extract metadata from audiobook intros via Gemini
 - **In-browser updates** - update from the web UI
 - **Backup & restore** - protect your configuration
 - **Version-aware renaming** - different narrators get separate folders

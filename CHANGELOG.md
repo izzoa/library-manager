@@ -2,6 +2,42 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.22] - 2025-12-13
+
+### Added
+- **Audio Analysis (Beta)** - Extract metadata from audiobook intros using Gemini
+  - Sends 90-second audio sample to Gemini 2.5 Flash for author/title/narrator extraction
+  - Used as verification when folder names and ID3 tags disagree
+  - New "Audio Analysis" toggle in Settings > Behavior
+  - ~3K tokens per book (separate quota from text analysis)
+  - Audio samples compressed to 64kbps mono (700KB per sample)
+
+---
+
+## [0.9.0-beta.21] - 2025-12-13
+
+### Fixed
+- **Author mismatch rejection** - BookDB now rejects matches where:
+  - Title is similar but NOT exact (e.g., "Lost Realms" vs "The Lost Realm")
+  - AND author is completely different (e.g., "Thomas Williams" vs "J. D. Rinehart")
+  - This prevents wrong book matches that share similar titles
+
+---
+
+## [0.9.0-beta.20] - 2025-12-13
+
+### Added
+- **Health Scan** - Detect corrupt/incomplete audio files
+  - New `/api/health_scan` endpoint scans entire library
+  - Uses ffprobe to verify each audio file is readable
+  - Groups corrupt files by folder for easy review
+  - Shows total healthy library duration
+- **Delete Corrupt Files** - Clean up broken downloads
+  - New `/api/delete_corrupt` endpoint safely removes bad files/folders
+  - Security: only allows deletion within configured library paths
+
+---
+
 ## [0.9.0-beta.19] - 2025-12-13
 
 ### Added
@@ -13,6 +49,10 @@ All notable changes to Library Manager will be documented in this file.
     - **Separate Library** - Creates standalone ebook folder structure
   - Scans loose ebook files and ebook-only folders
   - Uses same identification pipeline (BookDB + AI) as audiobooks
+- **Audiobookshelf Integration** - Connect to your ABS instance
+  - ABS API token stored securely in `secrets.json`
+  - Configurable ABS URL (`abs_url` in config)
+  - Foundation for future ABS sync features
 
 ### Fixed
 - **File handling in apply_fix** - Now properly handles single files, not just folders

@@ -11,7 +11,7 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.19"
+APP_VERSION = "0.9.0-beta.22"
 GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
 
 # Versioning Guide:
@@ -388,6 +388,7 @@ DEFAULT_CONFIG = {
     "enabled": True,
     "ebook_management": False,  # Enable ebook organization (Beta)
     "ebook_library_mode": "merge",  # "merge" = same folder as audiobooks, "separate" = own library
+    "audio_analysis": False,  # Enable Gemini audio analysis for verification (Beta)
     "update_channel": "beta",  # "stable", "beta", or "nightly"
     "naming_format": "author/title",  # "author/title", "author - title", "custom"
     "custom_naming_template": "{author}/{title}"  # Custom template with {author}, {title}, {series}, etc.
@@ -522,7 +523,7 @@ def load_config():
 def save_config(config):
     """Save configuration to file (excludes secrets)."""
     # Separate secrets from config
-    secrets_keys = ['openrouter_api_key', 'gemini_api_key']
+    secrets_keys = ['openrouter_api_key', 'gemini_api_key', 'abs_api_token']
     config_only = {k: v for k, v in config.items() if k not in secrets_keys}
 
     with open(CONFIG_PATH, 'w') as f:
@@ -1652,6 +1653,185 @@ def call_gemini(prompt, config, retry_count=0):
         logger.error(f"Gemini: {e}")
     return None
 
+
+def extract_audio_sample(audio_file, duration_seconds=90, output_format='mp3'):
+    """
+    Extract first N seconds of audio file for analysis.
+    Returns path to temp file or None on failure.
+    """
+    import subprocess
+    import tempfile
+
+    try:
+        # Create temp file for the sample
+        temp_file = tempfile.NamedTemporaryFile(suffix=f'.{output_format}', delete=False)
+        temp_path = temp_file.name
+        temp_file.close()
+
+        # Use ffmpeg to extract sample
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', audio_file,
+            '-t', str(duration_seconds),  # Duration
+            '-vn',  # No video
+            '-acodec', 'libmp3lame' if output_format == 'mp3' else 'aac',
+            '-b:a', '64k',  # Low bitrate for smaller file
+            '-ar', '16000',  # 16kHz sample rate (good for speech)
+            '-ac', '1',  # Mono
+            temp_path
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, timeout=60)
+
+        if result.returncode == 0 and os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+            return temp_path
+        else:
+            logger.debug(f"Audio extraction failed: {result.stderr.decode()[:200]}")
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            return None
+
+    except subprocess.TimeoutExpired:
+        logger.debug("Audio extraction timed out")
+        return None
+    except Exception as e:
+        logger.debug(f"Audio extraction error: {e}")
+        return None
+
+
+def analyze_audio_with_gemini(audio_file, config):
+    """
+    Send audio sample to Gemini for analysis.
+    Extracts author, title, narrator, and series info from audiobook intro.
+    Returns dict with extracted info or None on failure.
+    """
+    import base64
+
+    api_key = config.get('gemini_api_key')
+    if not api_key:
+        return None
+
+    # Extract audio sample (first 90 seconds)
+    sample_path = extract_audio_sample(audio_file, duration_seconds=90)
+    if not sample_path:
+        logger.debug(f"Could not extract audio sample from {audio_file}")
+        return None
+
+    try:
+        # Read and encode audio
+        with open(sample_path, 'rb') as f:
+            audio_data = base64.b64encode(f.read()).decode('utf-8')
+
+        # Clean up temp file
+        os.unlink(sample_path)
+
+        # Use gemini-2.5-flash for audio (separate quota from text analysis model)
+        model = 'gemini-2.5-flash'
+
+        prompt = """Listen to this audiobook intro and extract the following information.
+Many audiobooks start with an announcement like "This is [Title] by [Author], read by [Narrator]".
+
+Extract and return in JSON format:
+{
+    "title": "book title if mentioned",
+    "author": "author name if mentioned",
+    "narrator": "narrator name if mentioned",
+    "series": "series name if mentioned",
+    "confidence": "high/medium/low based on how clearly the info was stated"
+}
+
+If information is not clearly stated in the audio, use null for that field.
+Only include information you actually heard - do not guess."""
+
+        resp = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
+            headers={"Content-Type": "application/json"},
+            json={
+                "contents": [{
+                    "parts": [
+                        {"text": prompt},
+                        {
+                            "inline_data": {
+                                "mime_type": "audio/mp3",
+                                "data": audio_data
+                            }
+                        }
+                    ]
+                }],
+                "generationConfig": {"temperature": 0.1}
+            },
+            timeout=120  # Audio processing can take longer
+        )
+
+        if resp.status_code == 200:
+            result = resp.json()
+            text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            if text:
+                parsed = parse_json_response(text)
+                if parsed:
+                    logger.info(f"Audio analysis extracted: {parsed}")
+                    return parsed
+        else:
+            logger.debug(f"Gemini audio API error {resp.status_code}: {resp.text[:200]}")
+
+    except Exception as e:
+        logger.debug(f"Audio analysis error: {e}")
+        # Clean up temp file if it exists
+        if sample_path and os.path.exists(sample_path):
+            os.unlink(sample_path)
+
+    return None
+
+
+def get_audio_metadata_hints(book_path, config=None):
+    """
+    Get metadata hints from audio files in a book folder.
+    Combines ID3 tags + audio analysis for verification.
+    Returns dict with all found hints.
+    """
+    hints = {}
+    audio_files = find_audio_files(str(book_path))
+
+    if not audio_files:
+        return hints
+
+    # Sort to get first file (usually has intro)
+    audio_files.sort()
+    first_file = audio_files[0]
+
+    # Try ID3/metadata extraction first (fast)
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(first_file, easy=True)
+        if audio:
+            if audio.get('artist'):
+                hints['id3_author'] = audio.get('artist')[0]
+            if audio.get('album'):
+                hints['id3_album'] = audio.get('album')[0]
+            if audio.get('title'):
+                hints['id3_title'] = audio.get('title')[0]
+    except ImportError:
+        logger.debug("mutagen not installed - skipping ID3 extraction")
+    except Exception as e:
+        logger.debug(f"ID3 extraction failed: {e}")
+
+    # Audio analysis with Gemini (if enabled and configured)
+    if config and config.get('audio_analysis', False) and config.get('gemini_api_key'):
+        audio_info = analyze_audio_with_gemini(first_file, config)
+        if audio_info:
+            if audio_info.get('title'):
+                hints['audio_title'] = audio_info['title']
+            if audio_info.get('author'):
+                hints['audio_author'] = audio_info['author']
+            if audio_info.get('narrator'):
+                hints['audio_narrator'] = audio_info['narrator']
+            if audio_info.get('series'):
+                hints['audio_series'] = audio_info['series']
+            hints['audio_confidence'] = audio_info.get('confidence', 'unknown')
+
+    return hints
+
+
 # ============== DEEP SCANNER ==============
 
 import re
@@ -2078,7 +2258,19 @@ def search_bookdb_api(title):
                         logger.debug(f"BookDB API: Rejected garbage match '{search_title}' -> '{suggested_title}'")
                         continue
 
-                    author = item.get('author_name', '')
+                    result_author = item.get('author_name', '')
+
+                    # NEW: If we have an original author, reject if result author is completely different
+                    # AND title isn't exact match (allow author correction only for exact title matches)
+                    if author and result_author:
+                        title_is_exact = suggested_title.lower().strip() == search_title.lower().strip()
+                        author_is_drastic = is_drastic_author_change(author, result_author)
+
+                        if author_is_drastic and not title_is_exact:
+                            logger.debug(f"BookDB API: Rejected author mismatch - '{author}' vs '{result_author}' for non-exact title '{search_title}' vs '{suggested_title}'")
+                            continue
+
+                    author = result_author
                     # Fix author format (some have "Last, First")
                     if ',' in author and author.count(',') == 1:
                         parts = author.split(',')
@@ -2101,7 +2293,18 @@ def search_bookdb_api(title):
                     if is_garbage_match(search_title, suggested_title):
                         continue
 
-                    author = item.get('author_name', '')
+                    result_author = item.get('author_name', '')
+
+                    # Same author mismatch check for series
+                    if author and result_author:
+                        title_is_exact = suggested_title.lower().strip() == search_title.lower().strip()
+                        author_is_drastic = is_drastic_author_change(author, result_author)
+
+                        if author_is_drastic and not title_is_exact:
+                            logger.debug(f"BookDB API: Rejected series author mismatch - '{author}' vs '{result_author}'")
+                            continue
+
+                    author = result_author
                     if ',' in author and author.count(',') == 1:
                         parts = author.split(',')
                         author = f"{parts[1].strip()} {parts[0].strip()}"
@@ -3149,6 +3352,49 @@ def find_ebook_files(directory):
             if ext in EBOOK_EXTENSIONS:
                 ebook_files.append(os.path.join(root, f))
     return ebook_files
+
+
+def check_audio_file_health(file_path):
+    """
+    Check if an audio file is valid/corrupt using ffprobe.
+    Returns dict with: valid (bool), duration (seconds or None), error (str or None)
+    """
+    import subprocess
+
+    try:
+        # First check: can ffprobe read duration?
+        result = subprocess.run(
+            ['ffprobe', '-i', file_path, '-show_entries', 'format=duration',
+             '-v', 'quiet', '-of', 'csv=p=0'],
+            capture_output=True, text=True, timeout=30
+        )
+
+        duration_str = result.stdout.strip()
+
+        if not duration_str or duration_str == 'N/A':
+            # Try to get more info about why it failed
+            probe_result = subprocess.run(
+                ['ffprobe', '-i', file_path, '-v', 'error'],
+                capture_output=True, text=True, timeout=30
+            )
+            error_msg = probe_result.stderr.strip() or "Cannot read audio stream"
+            return {'valid': False, 'duration': None, 'error': error_msg}
+
+        try:
+            duration = float(duration_str)
+            # Sanity check - file should have reasonable duration
+            if duration < 1:
+                return {'valid': False, 'duration': duration, 'error': 'Duration too short (<1 sec)'}
+            return {'valid': True, 'duration': duration, 'error': None}
+        except ValueError:
+            return {'valid': False, 'duration': None, 'error': f'Invalid duration: {duration_str}'}
+
+    except subprocess.TimeoutExpired:
+        return {'valid': False, 'duration': None, 'error': 'Timeout reading file'}
+    except FileNotFoundError:
+        return {'valid': False, 'duration': None, 'error': 'ffprobe not installed'}
+    except Exception as e:
+        return {'valid': False, 'duration': None, 'error': str(e)}
 
 
 def get_file_signature(filepath, sample_size=8192):
@@ -4395,6 +4641,7 @@ def settings_page():
         config['series_grouping'] = 'series_grouping' in request.form
         config['ebook_management'] = 'ebook_management' in request.form
         config['ebook_library_mode'] = request.form.get('ebook_library_mode', 'merge')
+        config['audio_analysis'] = 'audio_analysis' in request.form
         config['google_books_api_key'] = request.form.get('google_books_api_key', '').strip() or None
         config['update_channel'] = request.form.get('update_channel', 'stable')
         config['naming_format'] = request.form.get('naming_format', 'author/title')
@@ -4596,6 +4843,131 @@ def api_deep_rescan():
         'protected': protected_count,
         'message': msg
     })
+
+
+@app.route('/api/health_scan', methods=['POST'])
+def api_health_scan():
+    """
+    Scan library for corrupt/incomplete audio files.
+    Uses ffprobe to verify each file can be read properly.
+    Returns list of problematic files grouped by book folder.
+    """
+    config = load_config()
+    library_paths = config.get('library_paths', [])
+
+    if not library_paths:
+        return jsonify({'success': False, 'error': 'No library paths configured'})
+
+    corrupt_files = []
+    total_checked = 0
+    total_duration = 0
+
+    for lib_path in library_paths:
+        lib_path = Path(lib_path)
+        if not lib_path.exists():
+            continue
+
+        # Find all audio files
+        audio_files = find_audio_files(str(lib_path))
+        logger.info(f"Health scan: checking {len(audio_files)} audio files in {lib_path}")
+
+        for audio_file in audio_files:
+            total_checked += 1
+            health = check_audio_file_health(audio_file)
+
+            if not health['valid']:
+                # Get folder info
+                file_path = Path(audio_file)
+                folder = file_path.parent
+                size_mb = file_path.stat().st_size / (1024 * 1024) if file_path.exists() else 0
+
+                corrupt_files.append({
+                    'file': str(audio_file),
+                    'folder': str(folder),
+                    'folder_name': folder.name,
+                    'filename': file_path.name,
+                    'size_mb': round(size_mb, 1),
+                    'error': health['error']
+                })
+            elif health['duration']:
+                total_duration += health['duration']
+
+    # Group by folder for easier review
+    folders_with_issues = {}
+    for cf in corrupt_files:
+        folder = cf['folder']
+        if folder not in folders_with_issues:
+            folders_with_issues[folder] = {
+                'folder': folder,
+                'folder_name': cf['folder_name'],
+                'files': [],
+                'total_size_mb': 0
+            }
+        folders_with_issues[folder]['files'].append({
+            'filename': cf['filename'],
+            'size_mb': cf['size_mb'],
+            'error': cf['error']
+        })
+        folders_with_issues[folder]['total_size_mb'] += cf['size_mb']
+
+    result = {
+        'success': True,
+        'total_checked': total_checked,
+        'total_healthy_duration_hours': round(total_duration / 3600, 1),
+        'corrupt_count': len(corrupt_files),
+        'folders_with_issues': list(folders_with_issues.values())
+    }
+
+    logger.info(f"Health scan complete: {total_checked} files checked, {len(corrupt_files)} corrupt")
+    return jsonify(result)
+
+
+@app.route('/api/delete_corrupt', methods=['POST'])
+def api_delete_corrupt():
+    """
+    Delete a corrupt folder or file.
+    Requires 'path' in request body - must be within a library path.
+    """
+    config = load_config()
+    library_paths = config.get('library_paths', [])
+    data = request.json if request.is_json else {}
+
+    target_path = data.get('path')
+    if not target_path:
+        return jsonify({'success': False, 'error': 'No path provided'})
+
+    target = Path(target_path)
+
+    # Security: verify path is within a library path
+    is_safe = False
+    for lib_path in library_paths:
+        try:
+            target.relative_to(lib_path)
+            is_safe = True
+            break
+        except ValueError:
+            continue
+
+    if not is_safe:
+        return jsonify({'success': False, 'error': 'Path not within library'})
+
+    if not target.exists():
+        return jsonify({'success': False, 'error': 'Path does not exist'})
+
+    try:
+        import shutil
+        if target.is_dir():
+            shutil.rmtree(target)
+            logger.info(f"Deleted corrupt folder: {target}")
+        else:
+            target.unlink()
+            logger.info(f"Deleted corrupt file: {target}")
+
+        return jsonify({'success': True, 'message': f'Deleted: {target}'})
+    except Exception as e:
+        logger.error(f"Failed to delete {target}: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+
 
 @app.route('/api/process', methods=['POST'])
 def api_process():

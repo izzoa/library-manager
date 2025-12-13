@@ -236,6 +236,15 @@
                                 </select>
                                 <small class="text-muted d-block mt-1">Merge: puts ebook in same Author/Title/ folder as audiobook</small>
                             </div>
+                            <div class="form-check form-switch mb-2 mt-3">
+                                <input class="form-check-input" type="checkbox" name="audio_analysis" id="audio_analysis"
+                                       {% if config.audio_analysis %}checked{% endif %}>
+                                <label class="form-check-label" for="audio_analysis">
+                                    <strong>Audio Analysis</strong>
+                                    <span class="badge bg-info">BETA</span>
+                                    <br><small class="text-muted">Use Gemini to analyze audiobook intros for author/title (requires Gemini API key)</small>
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </div>
