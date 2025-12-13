@@ -262,6 +262,13 @@ Pull requests welcome! Ideas:
 
 ---
 
+## Support & Contact
+
+- **Issues/Bugs:** [GitHub Issues](https://github.com/deucebucket/library-manager/issues)
+- **Email:** hello@deucebucket.com
+
+---
+
 ## License
 
 MIT License
