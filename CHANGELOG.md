@@ -2,6 +2,19 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.31] - 2025-12-15
+
+### Fixed
+- **Undo for single file moves** - Fixed undo creating folder instead of restoring file
+  - History now stores the actual file path for single-file moves
+  - Undo correctly extracts and restores just the file, not the containing folder
+
+- **Database connection leak** - Fixed connection leak in `/api/manual_match` error handler
+  - Exception handler now properly closes database connection
+  - Prevents "database is locked" errors under repeated failures
+
+---
+
 ## [0.9.0-beta.30] - 2025-12-15
 
 ### Fixed
