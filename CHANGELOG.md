@@ -2,6 +2,22 @@
 
 All notable changes to Library Manager will be documented in this file.
 
+## [0.9.0-beta.30] - 2025-12-15
+
+### Fixed
+- **Manual match save error** - Fixed JSON parsing error when saving manual book matches
+  - Root cause: `/api/manual_match` tried to update non-existent columns (`suggested_author`, etc.)
+  - Rewrote to properly create pending fixes in the history table (matching the rest of the codebase)
+  - Manual "Save as Pending Fix" now works correctly
+
+- **Single file moves losing extension** - Fixed audiobook files being saved without extension
+  - When applying fixes to single M4B files, the file was being renamed to the folder name
+  - Now properly creates folder structure and moves file inside with original filename
+  - Example: `Book.m4b` → `Author/Title/Book.m4b` (preserves extension)
+  - Metadata embedding now finds files correctly (was showing "0 files")
+
+---
+
 ## [0.9.0-beta.29] - 2025-12-15
 
 ### Added

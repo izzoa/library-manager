@@ -11,7 +11,7 @@ Features:
 - Multi-provider AI (Gemini, OpenRouter, Ollama)
 """
 
-APP_VERSION = "0.9.0-beta.29"
+APP_VERSION = "0.9.0-beta.30"
 GITHUB_REPO = "deucebucket/library-manager"  # Your GitHub repo
 
 # Versioning Guide:
@@ -4406,34 +4406,50 @@ def apply_fix(history_id):
     try:
         import shutil
 
-        # Check if we're moving a file (ebook/loose file) vs a folder
+        # Check if we're moving a file (ebook/loose file/single m4b) vs a folder
         is_file_move = old_path.is_file()
 
-        if new_path.exists():
-            if is_file_move:
-                # Moving a file to existing location - destination file already exists
-                error_msg = f"Destination file already exists: {new_path.name}"
+        # If moving a single file, ensure new_path includes the filename with extension
+        # (build_new_path returns a folder path, but for single files we need to include the filename)
+        if is_file_move:
+            # Check if new_path looks like a folder (no extension or doesn't match audio extension)
+            audio_extensions = {'.m4b', '.mp3', '.m4a', '.flac', '.ogg', '.opus', '.wma', '.aac'}
+            if new_path.suffix.lower() not in audio_extensions:
+                # new_path is a folder, we need to create folder and put file inside
+                file_dest = new_path / old_path.name
+                logger.info(f"Single file move: {old_path.name} -> {file_dest}")
+            else:
+                file_dest = new_path
+
+            if file_dest.exists():
+                error_msg = f"Destination file already exists: {file_dest.name}"
+                c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
+                         ('error', error_msg, history_id))
+                conn.commit()
+                conn.close()
+                return False, error_msg
+
+            # Create destination folder and move file
+            file_dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_path), str(file_dest))
+            # Update new_path to the folder for embedding later
+            new_path = file_dest.parent
+        elif new_path.exists():
+            # Moving a folder - check if destination has files
+            existing_files = list(new_path.iterdir())
+            if existing_files:
+                # DON'T MERGE - this is likely a different narrator version
+                error_msg = "Destination folder already exists with files - possible different narrator version"
                 c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
                          ('error', error_msg, history_id))
                 conn.commit()
                 conn.close()
                 return False, error_msg
             else:
-                # Moving a folder - check if destination has files
-                existing_files = list(new_path.iterdir())
-                if existing_files:
-                    # DON'T MERGE - this is likely a different narrator version
-                    error_msg = "Destination folder already exists with files - possible different narrator version"
-                    c.execute('UPDATE history SET status = ?, error_message = ? WHERE id = ?',
-                             ('error', error_msg, history_id))
-                    conn.commit()
-                    conn.close()
-                    return False, error_msg
-                else:
-                    # Destination is empty folder - safe to use it
-                    shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
-                    new_path.rmdir()
-                    (new_path.parent / (new_path.name + "_temp")).rename(new_path)
+                # Destination is empty folder - safe to use it
+                shutil.move(str(old_path), str(new_path.parent / (new_path.name + "_temp")))
+                new_path.rmdir()
+                (new_path.parent / (new_path.name + "_temp")).rename(new_path)
         else:
             # Destination doesn't exist - create parent folders and move
             new_path.parent.mkdir(parents=True, exist_ok=True)
@@ -6853,77 +6869,111 @@ def api_manual_match():
     """
     Save a manual match for a book in the queue.
     Accepts custom author/title OR a selected BookDB result.
-    Updates the queue item to go to Pending for review.
+    Creates a pending_fix entry in history for review.
     """
-    data = request.get_json() or {}
-    queue_id = data.get('queue_id')
+    try:
+        data = request.get_json() or {}
+        queue_id = data.get('queue_id')
 
-    # Manual entry fields
-    new_author = data.get('author', '').strip()
-    new_title = data.get('title', '').strip()
+        # Manual entry fields
+        new_author = data.get('author', '').strip()
+        new_title = data.get('title', '').strip()
 
-    # Or BookDB selection
-    bookdb_result = data.get('bookdb_result')  # Full result object from search
+        # Or BookDB selection
+        bookdb_result = data.get('bookdb_result')  # Full result object from search
 
-    if not queue_id:
-        return jsonify({'success': False, 'error': 'queue_id required'})
+        if not queue_id:
+            return jsonify({'success': False, 'error': 'queue_id required'})
 
-    conn = get_db()  # Use main database, not local
-    c = conn.cursor()
+        conn = get_db()
+        c = conn.cursor()
 
-    # Get the queue item with book info
-    c.execute('''SELECT q.id as queue_id, q.book_id, q.reason,
-                        b.path, b.current_author, b.current_title
-                 FROM queue q
-                 JOIN books b ON q.book_id = b.id
-                 WHERE q.id = ?''', (queue_id,))
-    item = c.fetchone()
-    if not item:
+        # Get the queue item with book info
+        c.execute('''SELECT q.id as queue_id, q.book_id, q.reason,
+                            b.path, b.current_author, b.current_title
+                     FROM queue q
+                     JOIN books b ON q.book_id = b.id
+                     WHERE q.id = ?''', (queue_id,))
+        item = c.fetchone()
+        if not item:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Queue item not found'})
+
+        book_id = item['book_id']
+        old_path = item['path']
+        old_author = item['current_author']
+        old_title = item['current_title']
+
+        # Determine new values from BookDB result if provided
+        new_series = None
+        new_series_num = None
+        new_narrator = None
+        new_year = None
+        if bookdb_result:
+            new_author = bookdb_result.get('author_name') or new_author
+            new_title = bookdb_result.get('name') or bookdb_result.get('title') or new_title
+            new_series = bookdb_result.get('series_name')
+            new_series_num = bookdb_result.get('series_position')
+            new_year = bookdb_result.get('year_published')
+
+        if not new_author or not new_title:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Author and title required'})
+
+        # Find which library this book belongs to
+        config = load_config()
+        lib_path = None
+        for lp in config.get('library_paths', []):
+            lp_path = Path(lp)
+            try:
+                Path(old_path).relative_to(lp_path)
+                lib_path = lp_path
+                break
+            except ValueError:
+                continue
+
+        if lib_path is None:
+            lib_path = Path(old_path).parent.parent
+
+        # Build the new path
+        new_path = build_new_path(lib_path, new_author, new_title,
+                                  series=new_series, series_num=new_series_num,
+                                  narrator=new_narrator, year=new_year, config=config)
+
+        if new_path is None:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Could not build valid path for this metadata'})
+
+        # Delete any existing pending entries for this book
+        c.execute("DELETE FROM history WHERE book_id = ? AND status = 'pending_fix'", (book_id,))
+
+        # Insert as pending fix in history (like process_queue does)
+        c.execute('''INSERT INTO history (book_id, old_author, old_title, new_author, new_title, old_path, new_path, status,
+                                          new_narrator, new_series, new_series_num, new_year, new_edition, new_variant)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_fix', ?, ?, ?, ?, ?, ?)''',
+                 (book_id, old_author, old_title,
+                  new_author, new_title, old_path, str(new_path),
+                  new_narrator, new_series, str(new_series_num) if new_series_num else None,
+                  str(new_year) if new_year else None, None, None))
+
+        # Update book status
+        c.execute('UPDATE books SET status = ? WHERE id = ?', ('pending_fix', book_id))
+
+        # Remove from queue
+        c.execute('DELETE FROM queue WHERE id = ?', (queue_id,))
+
+        conn.commit()
         conn.close()
-        return jsonify({'success': False, 'error': 'Queue item not found'})
 
-    item = dict(item)
-    book_id = item['book_id']
-    old_path = item['path']
-    old_author = item['current_author']
-    old_title = item['current_title']
-
-    # Determine new values from BookDB result if provided
-    new_series = None
-    new_series_num = None
-    if bookdb_result:
-        new_author = bookdb_result.get('author_name') or new_author
-        new_title = bookdb_result.get('name') or bookdb_result.get('title') or new_title
-        new_series = bookdb_result.get('series_name')
-        new_series_num = bookdb_result.get('series_position')
-
-    if not new_author or not new_title:
-        conn.close()
-        return jsonify({'success': False, 'error': 'Author and title required'})
-
-    # Update the book record with new metadata
-    c.execute('''UPDATE books SET
-                 suggested_author = ?,
-                 suggested_title = ?,
-                 suggested_series = ?,
-                 suggested_series_num = ?,
-                 status = 'pending_fix'
-                 WHERE id = ?''',
-              (new_author, new_title, new_series, new_series_num, book_id))
-
-    # Update queue reason to indicate manual match
-    c.execute('''UPDATE queue SET reason = ? WHERE id = ?''',
-              (f'manual_match: {new_author} / {new_title}', queue_id))
-
-    conn.commit()
-    conn.close()
-
-    return jsonify({
-        'success': True,
-        'message': f'Saved: {old_author}/{old_title} → {new_author}/{new_title}',
-        'new_author': new_author,
-        'new_title': new_title
-    })
+        return jsonify({
+            'success': True,
+            'message': f'Saved: {old_author}/{old_title} → {new_author}/{new_title}',
+            'new_author': new_author,
+            'new_title': new_title
+        })
+    except Exception as e:
+        logger.error(f"Error in manual_match: {e}")
+        return jsonify({'success': False, 'error': str(e)})
 
 
 # ============== BACKUP & RESTORE ==============
